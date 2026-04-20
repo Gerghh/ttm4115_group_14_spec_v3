@@ -1,66 +1,73 @@
-import stmpy
-import logging
 import json
 import time
 
+
 class PackageDeliveryComponent:
-    def __init__(self, package_id, mqtt_client):
-        self.package_id = package_id
+    def __init__(self, mqtt_client):
         self.mqtt_client = mqtt_client
-        self.topic = f"delivery/{package_id}/status"
+        self.drone_id    = None
+        self.package_id  = None
+        self.telemetry   = {"battery": 100, "speed": 0, "eta": "Calculating..."}
 
-        self.telemetry = {
-            "pos": [0.0, 0.0],
-            "battery": 100,
-            "speed": 0,
-            "eta": "Calculating..."
-        }
+    @property
+    def topic(self):
+        return f"delivery/{self.package_id or 'unknown'}/status"
 
-    def _publish_update(self, state_name):
-        """Sends a JSON payload over MQTT representing the current system state."""
-        payload = {
+    def _publish(self, state_name):
+        self.mqtt_client.publish(self.topic, json.dumps({
             "package_id": self.package_id,
-            "status": state_name,
-            "telemetry": self.telemetry,
-            "timestamp": time.time()
-        }
-        self.mqtt_client.publish(self.topic, json.dumps(payload))
-        print(f"[MQTT] Published status: {state_name}")
+            "drone_id":   self.drone_id,
+            "status":     state_name,
+            "telemetry":  self.telemetry,
+            "timestamp":  time.time(),
+        }))
 
     def on_idle(self):
-        print("System Idle. Waiting for package...")
+        self.telemetry["speed"] = 0
+        self._publish("Idle")
 
     def on_notice(self):
-        self._publish_update("Notice of package")
-        
+        self._publish("Notice of package")
+
     def on_pickup_ready(self):
-        self._publish_update("Ready for drone pickup")
+        self._publish("Ready for drone pickup")
 
     def on_transport(self):
-        self.telemetry["speed"] = 15 
-        self._publish_update("In transport")
+        self.telemetry["speed"]   = 45
+        self.telemetry["battery"] -= 5
+        self.telemetry["eta"]     = "12 mins"
+        self._publish("In transport")
 
     def on_delivery_place(self):
-        self._publish_update("At delivery place")
+        self.telemetry["speed"] = 0
+        self.telemetry["eta"]   = "Arrived"
+        self._publish("At delivery place")
 
     def on_return(self):
-        self._publish_update("Return to sender")
+        self.telemetry["speed"] = 45
+        self.telemetry["eta"]   = "Returning..."
+        self._publish("Return to sender")
 
     def remove_package(self):
-        print(f"Cleaning up resources for {self.package_id}")
+        print(f"[UC2] Package {self.package_id} complete.")
 
-t0 = {'source': 'initial', 'target': 'Idle'}
-t1 = {'trigger': 'package_sent', 'source': 'Idle', 'target': 'Notice of package'}
-t2 = {'trigger': 'package_at_pickup', 'source': 'Notice of package', 'target': 'Ready for drone pickup'}
-t3 = {'trigger': 'picked_up', 'source': 'Ready for drone pickup', 'target': 'In transport'}
-t4 = {'trigger': 'dropped_off', 'source': 'In transport', 'target': 'At delivery place'}
-t5 = {'trigger': 'delivered', 'source': 'At delivery place', 'target': 'Idle', 'effect': 'remove_package'}
-t6 = {'trigger': 't', 'source': 'At delivery place', 'target': 'Return to sender'}
-t7 = {'trigger': 'returned', 'source': 'Return to sender', 'target': 'Idle', 'effect': 'remove_package'}
 
-idle = {'name': 'Idle', 'entry': 'on_idle'}
-notice = {'name': 'Notice of package', 'entry': 'on_notice'}
-pickup = {'name': 'Ready for drone pickup', 'entry': 'on_pickup_ready'}
-transport = {'name': 'In transport', 'entry': 'on_transport'}
-at_place = {'name': 'At delivery place', 'entry': 'on_delivery_place; start_timer("t", 5000)'}
-ret_sender = {'name': 'Return to sender', 'entry': 'on_return'}
+UC2_TRANSITIONS = [
+    {"source": "initial",            "target": "Idle"},
+    {"trigger": "package_sent",      "source": "Idle",                   "target": "Notice of package"},
+    {"trigger": "package_at_pickup", "source": "Notice of package",      "target": "Ready for drone pickup"},
+    {"trigger": "picked_up",         "source": "Ready for drone pickup", "target": "In transport"},
+    {"trigger": "dropped_off",       "source": "In transport",           "target": "At delivery place"},
+    {"trigger": "delivered",         "source": "At delivery place",      "target": "Idle", "effect": "remove_package"},
+    {"trigger": "t",                 "source": "At delivery place",      "target": "Return to sender"},
+    {"trigger": "returned",          "source": "Return to sender",       "target": "Idle", "effect": "remove_package"},
+]
+
+UC2_STATES = [
+    {"name": "Idle",                   "entry": "on_idle"},
+    {"name": "Notice of package",      "entry": "on_notice"},
+    {"name": "Ready for drone pickup", "entry": "on_pickup_ready"},
+    {"name": "In transport",           "entry": "on_transport"},
+    {"name": "At delivery place",      "entry": 'on_delivery_place; start_timer("t", 8000)'},
+    {"name": "Return to sender",       "entry": "on_return"},
+]

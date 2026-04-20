@@ -4,12 +4,14 @@ import paho.mqtt.client as mqtt
 import stmpy
 import json
 import logging
+import sys
+import os
 
-from StateMachines import (
-    DroneComponent,          UC1_TRANSITIONS, UC1_STATES,
-    PackageDeliveryComponent, UC2_TRANSITIONS, UC2_STATES,
-    OrderProcessComponent,   UC3_TRANSITIONS, UC3_STATES,
-)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+from usecase1.StateMachine import DroneComponent,           UC1_TRANSITIONS, UC1_STATES
+from usecase2.StateMachine import PackageDeliveryComponent, UC2_TRANSITIONS, UC2_STATES
+from usecase3.StateMachine import OrderProcessComponent,    UC3_TRANSITIONS, UC3_STATES
 
 DRONE_CONFIGS = [
     {"id": "Drone-Alpha", "battery": 85.0, "rotor_ok": True,  "sensors_ok": True,  "communication_ok": True},
@@ -45,10 +47,9 @@ class UnifiedApp:
         logging.basicConfig(level=logging.INFO)
         self._logger = logging.getLogger(__name__)
 
-        self.drone_statuses        = {}   # drone_id → current status string
+        self.drone_statuses        = {}  
         self.current_delivery_drone = None
 
-        # ── MQTT ──────────────────────────────────────────────────────
         self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.mqtt_client.on_connect = self.on_connect
         self.mqtt_client.on_message = self.on_message
@@ -57,7 +58,6 @@ class UnifiedApp:
 
         self.driver = stmpy.Driver()
 
-        # ── UC-1: one stmpy machine per drone ─────────────────────────
         self.drone_components = {}
         for cfg in DRONE_CONFIGS:
             comp = DroneComponent(
@@ -73,14 +73,12 @@ class UnifiedApp:
             self.drone_components[cfg["id"]] = comp
             self.driver.add_machine(machine)
 
-        # ── UC-2: single delivery machine ─────────────────────────────
         self.delivery_comp = PackageDeliveryComponent(self.mqtt_client)
         self.driver.add_machine(stmpy.Machine(
             name="delivery_stm", transitions=UC2_TRANSITIONS,
             obj=self.delivery_comp, states=UC2_STATES,
         ))
 
-        # ── UC-3: order machine ────────────────────────────────────────
         self.order_comp = OrderProcessComponent(
             mqtt_client=self.mqtt_client,
             get_ready_drone=self.get_ready_drone,
@@ -97,11 +95,9 @@ class UnifiedApp:
 
         self.create_gui()
 
-        # Run initial diagnostics so the fleet tab shows real statuses immediately
         for drone_id in self.drone_components:
             self.driver.send("run_diag", drone_id)
 
-    # ── Integration helpers ────────────────────────────────────────────
 
     def get_ready_drone(self):
         """Return the first READY drone from the live fleet, or fall back to Alpha."""
@@ -122,12 +118,10 @@ class UnifiedApp:
 
         self.driver.send("package_sent", "delivery_stm")
 
-        # Switch to the delivery tab and update the header
         self.root.after(0, lambda: self.notebook.select(self.delivery_tab))
         self.root.after(0, lambda: self.lbl_delivery_header.config(
             text=f"Drone: {drone_id}   |   Package: {pkg_id}", fg="black"))
 
-    # ── MQTT callbacks ─────────────────────────────────────────────────
 
     def on_connect(self, client, userdata, flags, reason_code, properties):
         self._logger.info("Connected to MQTT broker.")
@@ -211,7 +205,6 @@ class UnifiedApp:
         self.lbl_delivery_speed.config(text=f"Speed: {t.get('speed', '--')} km/h")
         self.lbl_delivery_eta.config(text=f"ETA: {t.get('eta', '--')}")
 
-    # ── GUI ────────────────────────────────────────────────────────────
 
     def create_gui(self):
         self.root = tk.Tk()
@@ -237,7 +230,6 @@ class UnifiedApp:
         self.create_order_tab(self.order_tab)
         self.create_delivery_tab(self.delivery_tab)
 
-    # ── Tab 1: Fleet ───────────────────────────────────────────────────
 
     def create_fleet_tab(self, parent):
         self.fleet_widgets = {}
@@ -283,7 +275,6 @@ class UnifiedApp:
         tk.Button(parent, text="Re-diagnose All Drones", height=2, bg="lightblue",
                   command=self.re_diagnose_all).pack(fill="x", padx=10, pady=8)
 
-    # ── Tab 2: Order ───────────────────────────────────────────────────
 
     def create_order_tab(self, parent):
         hud = tk.LabelFrame(parent, text="Order Status", font=("Helvetica", 11, "bold"))
@@ -331,7 +322,6 @@ class UnifiedApp:
                   height=2, bg="#ffcccc",
                   command=self.fail_payment).pack(fill="x", padx=8, pady=3)
 
-    # ── Tab 3: Delivery ────────────────────────────────────────────────
 
     def create_delivery_tab(self, parent):
         hud = tk.LabelFrame(parent, text="Live Delivery Telemetry", font=("Helvetica", 11, "bold"))
@@ -372,7 +362,6 @@ class UnifiedApp:
                       "the drone automatically returns to sender.",
                  fg="grey", font=("Helvetica", 8), wraplength=520).pack(pady=4)
 
-    # ── Actions ────────────────────────────────────────────────────────
 
     def submit_order(self):
         name   = self.entry_name.get().strip()
