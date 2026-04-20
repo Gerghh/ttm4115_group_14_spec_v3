@@ -5,9 +5,7 @@ import json
 import time
 import logging
 
-# ==========================================
-# 1. THE STATE MACHINE COMPONENT
-# ==========================================
+#components
 class PackageDeliveryComponent:
     def __init__(self, package_id, mqtt_client):
         self.package_id = package_id
@@ -15,7 +13,7 @@ class PackageDeliveryComponent:
         self.topic = f"delivery/{package_id}/status"
         
         self.telemetry = {
-            "pos": [63.4305, 10.3951], # Trondheim coordinates
+            "pos": [63.4305, 10.3951], # coordinated for Trondheim
             "battery": 100,
             "speed": 0,
             "eta": "Calculating..."
@@ -60,7 +58,7 @@ class PackageDeliveryComponent:
         print(f"[{self.package_id}] Cleaned up resources.")
 
 
-# State Machine Definitions
+# State Machine Def
 t0 = {'source': 'initial', 'target': 'Idle'}
 t1 = {'trigger': 'package_sent', 'source': 'Idle', 'target': 'Notice of package'}
 t2 = {'trigger': 'package_at_pickup', 'source': 'Notice of package', 'target': 'Ready for drone pickup'}
@@ -78,9 +76,7 @@ at_place = {'name': 'At delivery place', 'entry': 'on_delivery_place; start_time
 ret_sender = {'name': 'Return to sender', 'entry': 'on_return'}
 
 
-# ==========================================
-# 2. THE TKINTER GUI / HUD COMPONENT
-# ==========================================
+#hud
 class DroneHUDApp:
     def __init__(self):
         logging.basicConfig(level=logging.INFO)
@@ -88,14 +84,14 @@ class DroneHUDApp:
         self.package_id = "PKG-123"
         self.topic = f"delivery/{self.package_id}/status"
 
-        # 1. Setup MQTT
+        #MQTT Client Setup
         self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.mqtt_client.on_connect = self.on_connect
         self.mqtt_client.on_message = self.on_message
         self.mqtt_client.connect("broker.hivemq.com", 1883)
         self.mqtt_client.loop_start()
 
-        # 2. Setup STMPY Machine
+        #STMPY State Machine Setup
         self.delivery_logic = PackageDeliveryComponent(self.package_id, self.mqtt_client)
         self.machine = stmpy.Machine(
             name='package_stm', 
@@ -107,7 +103,7 @@ class DroneHUDApp:
         self.driver.add_machine(self.machine)
         self.driver.start()
 
-        # 3. Create GUI
+        #GUI Setup
         self.create_gui()
 
     def on_connect(self, client, userdata, flags, reason_code, properties):
@@ -141,7 +137,7 @@ class DroneHUDApp:
         self.root.geometry("350x550")
         self.root.protocol("WM_DELETE_WINDOW", self.stop)
 
-        # --- HUD FRAME (Top) ---
+        #Frame of the HUD
         hud_frame = tk.LabelFrame(self.root, text="Live Telemetry HUD", font=('Helvetica', 12, 'bold'))
         hud_frame.pack(fill="x", padx=10, pady=10, ipady=10)
 
@@ -157,7 +153,7 @@ class DroneHUDApp:
         self.lbl_eta = tk.Label(hud_frame, text="ETA: --", font=('Helvetica', 11))
         self.lbl_eta.pack()
 
-        # --- CONTROLS FRAME (Bottom) ---
+        # Controls Frame
         ctrl_frame = tk.LabelFrame(self.root, text="System Controls (Send Triggers)")
         ctrl_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
@@ -184,9 +180,7 @@ class DroneHUDApp:
         self.mqtt_client.disconnect()
         self.root.destroy()
 
-# ==========================================
-# 3. RUN THE APP
-# ==========================================
+# running
 if __name__ == "__main__":
     app = DroneHUDApp()
     app.start()
