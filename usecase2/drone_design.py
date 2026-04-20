@@ -6,12 +6,15 @@ import time
 import logging
 
 
+ASSIGNED_DRONE = "Drone-Alpha"  # Which UC-1 fleet drone is doing this delivery
+
+
 class PackageDeliveryComponent:
     def __init__(self, package_id, mqtt_client):
         self.package_id = package_id
         self.mqtt_client = mqtt_client
         self.topic = f"delivery/{package_id}/status"
-        
+
         self.telemetry = {
             "pos": [63.4305, 10.3951], # Trondheim coordinates
             "battery": 100,
@@ -22,6 +25,7 @@ class PackageDeliveryComponent:
     def _publish_update(self, state_name):
         payload = {
             "package_id": self.package_id,
+            "drone_id": ASSIGNED_DRONE,  # UC-1 fleet dashboard listens for this
             "status": state_name,
             "telemetry": self.telemetry,
             "timestamp": time.time()

@@ -7,16 +7,16 @@ BATTERY_THRESHOLD = 60.0
 
 
 class DroneComponent:
-    def __init__(self, drone_id, mqtt_client):
+    def __init__(self, drone_id, mqtt_client, battery=100.0, rotor_ok=True, sensors_ok=True, communication_ok=True):
         self.drone_id = drone_id
         self.mqtt_client = mqtt_client
         self.topic = f"drone/{drone_id}/status"
 
         self.telemetry = {
-            "battery": 100.0,
-            "rotor_ok": True,
-            "sensors_ok": True,
-            "communication_ok": True,
+            "battery": battery,
+            "rotor_ok": rotor_ok,
+            "sensors_ok": sensors_ok,
+            "communication_ok": communication_ok,
         }
 
     def _publish(self, status, message):
@@ -60,29 +60,37 @@ class DroneComponent:
             issues.append("rotor failure")
         if not self.telemetry["sensors_ok"]:
             issues.append("sensor failure")
-        self._publish("MAINTENANCE", "Drone requires maintenance: " + ", ".join(issues) + ".")
+        self._publish("MAINTENANCE", "Requires maintenance: " + ", ".join(issues) + ".")
 
     def on_offline(self):
-        self._publish("OFFLINE", "Communication with drone failed. Drone is unreachable.")
+        self._publish("OFFLINE", "Communication failed. Drone is unreachable.")
 
-    def reset(self):
-        self.stm.send("go_idle")
+    def on_delivering(self):
+        self._publish("DELIVERING", "Drone is currently out on a delivery.")
 
 
-t0  = {"source": "initial",     "target": "Idle"}
-t1  = {"trigger": "run_diag",   "source": "Idle",        "target": "Diagnostic", "effect": "on_diagnostic; evaluate"}
-t2  = {"trigger": "result_ready",       "source": "Diagnostic", "target": "Ready"}
-t3  = {"trigger": "result_charging",    "source": "Diagnostic", "target": "Charging"}
-t4  = {"trigger": "result_maintenance", "source": "Diagnostic", "target": "Maintenance"}
-t5  = {"trigger": "result_offline",     "source": "Diagnostic", "target": "Offline"}
-t6  = {"trigger": "go_idle", "source": "Ready",       "target": "Idle"}
-t7  = {"trigger": "go_idle", "source": "Charging",    "target": "Idle"}
-t8  = {"trigger": "go_idle", "source": "Maintenance", "target": "Idle"}
-t9  = {"trigger": "go_idle", "source": "Offline",     "target": "Idle"}
+# Transitions
+t0  = {"source": "initial",             "target": "Idle"}
+t1  = {"trigger": "run_diag",           "source": "Idle",        "target": "Diagnostic", "effect": "on_diagnostic; evaluate"}
+t2  = {"trigger": "result_ready",       "source": "Diagnostic",  "target": "Ready"}
+t3  = {"trigger": "result_charging",    "source": "Diagnostic",  "target": "Charging"}
+t4  = {"trigger": "result_maintenance", "source": "Diagnostic",  "target": "Maintenance"}
+t5  = {"trigger": "result_offline",     "source": "Diagnostic",  "target": "Offline"}
+t6  = {"trigger": "go_idle",            "source": "Ready",       "target": "Idle"}
+t7  = {"trigger": "go_idle",            "source": "Charging",    "target": "Idle"}
+t8  = {"trigger": "go_idle",            "source": "Maintenance", "target": "Idle"}
+t9  = {"trigger": "go_idle",            "source": "Offline",     "target": "Idle"}
+t10 = {"trigger": "drone_busy",         "source": "Ready",       "target": "Delivering"}
+t11 = {"trigger": "drone_free",         "source": "Delivering",  "target": "Ready"}
 
+# States
 idle        = {"name": "Idle",        "entry": "on_idle"}
 diagnostic  = {"name": "Diagnostic",  "entry": "on_diagnostic"}
 ready       = {"name": "Ready",       "entry": "on_ready"}
 charging    = {"name": "Charging",    "entry": "on_charging"}
 maintenance = {"name": "Maintenance", "entry": "on_maintenance"}
 offline     = {"name": "Offline",     "entry": "on_offline"}
+delivering  = {"name": "Delivering",  "entry": "on_delivering"}
+
+ALL_TRANSITIONS = [t0, t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11]
+ALL_STATES      = [idle, diagnostic, ready, charging, maintenance, offline, delivering]

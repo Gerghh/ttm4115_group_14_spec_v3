@@ -4,126 +4,194 @@ import stmpy
 import json
 import logging
 
-from StateMachine import (
-    DroneComponent,
-    t0, t1, t2, t3, t4, t5, t6, t7, t8, t9,
-    idle, diagnostic, ready, charging, maintenance, offline,
-)
+from StateMachine import DroneComponent, ALL_TRANSITIONS, ALL_STATES
+
+# Pre-configured fleet — mirrors the UC-1 demo scenarios
+DRONE_CONFIGS = [
+    {"id": "Drone-Alpha", "battery": 85.0, "rotor_ok": True,  "sensors_ok": True,  "communication_ok": True},
+    {"id": "Drone-Beta",  "battery": 35.0, "rotor_ok": True,  "sensors_ok": True,  "communication_ok": True},
+    {"id": "Drone-Gamma", "battery": 72.0, "rotor_ok": False, "sensors_ok": True,  "communication_ok": True},
+    {"id": "Drone-Delta", "battery": 0.0,  "rotor_ok": False, "sensors_ok": False, "communication_ok": False},
+]
+
+STATUS_COLORS = {
+    "IDLE":        "grey",
+    "DIAGNOSTIC":  "orange",
+    "READY":       "green",
+    "CHARGING":    "blue",
+    "MAINTENANCE": "red",
+    "OFFLINE":     "darkred",
+    "DELIVERING":  "purple",
+}
 
 
-class DroneMonitorApp:
+class FleetDashboardApp:
     def __init__(self):
         logging.basicConfig(level=logging.INFO)
         self._logger = logging.getLogger(__name__)
-        self.drone_id = "Drone-Alpha"
-        self.topic = f"drone/{self.drone_id}/status"
 
+        # MQTT
         self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.mqtt_client.on_connect = self.on_connect
         self.mqtt_client.on_message = self.on_message
         self.mqtt_client.connect("broker.hivemq.com", 1883)
         self.mqtt_client.loop_start()
 
-        self.drone = DroneComponent(self.drone_id, self.mqtt_client)
-        self.machine = stmpy.Machine(
-            name="drone_stm",
-            transitions=[t0, t1, t2, t3, t4, t5, t6, t7, t8, t9],
-            obj=self.drone,
-            states=[idle, diagnostic, ready, charging, maintenance, offline],
-        )
-        self.drone.stm = self.machine
+        # Build one stmpy machine per drone
+        self.components = {}   # drone_id → DroneComponent
         self.driver = stmpy.Driver()
-        self.driver.add_machine(self.machine)
+
+        for cfg in DRONE_CONFIGS:
+            comp = DroneComponent(
+                drone_id=cfg["id"],
+                mqtt_client=self.mqtt_client,
+                battery=cfg["battery"],
+                rotor_ok=cfg["rotor_ok"],
+                sensors_ok=cfg["sensors_ok"],
+                communication_ok=cfg["communication_ok"],
+            )
+            machine = stmpy.Machine(
+                name=cfg["id"],
+                transitions=ALL_TRANSITIONS,
+                obj=comp,
+                states=ALL_STATES,
+            )
+            comp.stm = machine
+            self.components[cfg["id"]] = comp
+            self.driver.add_machine(machine)
+
         self.driver.start()
 
         self.create_gui()
 
+        # Run initial diagnostic for every drone so the dashboard shows real statuses
+        for drone_id in self.components:
+            self.driver.send("run_diag", drone_id)
+
+    # ------------------------------------------------------------------
+    # MQTT callbacks
+    # ------------------------------------------------------------------
     def on_connect(self, client, userdata, flags, reason_code, properties):
         self._logger.info("Connected to MQTT broker.")
-        self.mqtt_client.subscribe(self.topic)
+        # Own drone diagnostics
+        self.mqtt_client.subscribe("drone/+/status")
+        # UC-2 delivery events — tells us when a drone is out on a job
+        self.mqtt_client.subscribe("delivery/+/status")
 
     def on_message(self, client, userdata, msg):
-        data = json.loads(msg.payload.decode("utf-8"))
-        self.root.after(0, self.update_display, data)
+        try:
+            data = json.loads(msg.payload.decode("utf-8"))
+        except Exception:
+            return
 
-    def update_display(self, data):
+        topic = msg.topic
+        if topic.startswith("drone/"):
+            # Own diagnostic update
+            self.root.after(0, self.handle_drone_status, data)
+        elif topic.startswith("delivery/"):
+            # UC-2 delivery update
+            self.root.after(0, self.handle_delivery_status, data)
+
+    def handle_drone_status(self, data):
+        drone_id = data.get("drone_id")
+        if drone_id not in self.widgets:
+            return
         status = data["status"]
-        colors = {
-            "IDLE": "grey",
-            "DIAGNOSTIC": "orange",
-            "READY": "green",
-            "CHARGING": "blue",
-            "MAINTENANCE": "red",
-            "OFFLINE": "darkred",
-        }
-        color = colors.get(status, "black")
-        self.lbl_status.config(text=f"STATUS: {status}", fg=color)
-        self.lbl_message.config(text=data["message"])
         t = data["telemetry"]
-        self.lbl_battery.config(text=f"Battery: {t['battery']:.1f}%")
-        self.lbl_rotor.config(text=f"Rotor OK: {t['rotor_ok']}")
-        self.lbl_sensors.config(text=f"Sensors OK: {t['sensors_ok']}")
-        self.lbl_comms.config(text=f"Comms OK: {t['communication_ok']}")
+        w = self.widgets[drone_id]
+        w["status"].config(text=status, fg=STATUS_COLORS.get(status, "black"))
+        w["message"].config(text=data["message"])
+        w["battery"].config(text=f"Battery: {t['battery']:.1f}%")
+        w["rotor"].config(text=f"Rotor: {'OK' if t['rotor_ok'] else 'FAIL'}", fg="green" if t["rotor_ok"] else "red")
+        w["sensors"].config(text=f"Sensors: {'OK' if t['sensors_ok'] else 'FAIL'}", fg="green" if t["sensors_ok"] else "red")
+        w["comms"].config(text=f"Comms: {'OK' if t['communication_ok'] else 'FAIL'}", fg="green" if t["communication_ok"] else "red")
 
-    def run_diagnostic(self):
-        self.driver.send("run_diag", "drone_stm")
+    def handle_delivery_status(self, data):
+        # UC-2 publishes which drone is doing the delivery
+        drone_id = data.get("drone_id")
+        uc2_status = data.get("status", "")
 
-    def reset_drone(self):
-        self.driver.send("go_idle", "drone_stm")
+        if not drone_id or drone_id not in self.components:
+            return
 
-    def set_scenario(self, battery, rotor_ok, sensors_ok, comms_ok):
-        self.drone.telemetry["battery"] = battery
-        self.drone.telemetry["rotor_ok"] = rotor_ok
-        self.drone.telemetry["sensors_ok"] = sensors_ok
-        self.drone.telemetry["communication_ok"] = comms_ok
-        self._logger.info(f"Scenario set: battery={battery}, rotor={rotor_ok}, sensors={sensors_ok}, comms={comms_ok}")
+        if uc2_status == "In transport":
+            self.driver.send("drone_busy", drone_id)
+        elif uc2_status == "Idle":
+            self.driver.send("drone_free", drone_id)
 
+    # ------------------------------------------------------------------
+    # GUI
+    # ------------------------------------------------------------------
     def create_gui(self):
         self.root = tk.Tk()
-        self.root.title("Drone Diagnostic Monitor")
-        self.root.geometry("380x560")
+        self.root.title("UC-1: Drone Fleet Dashboard")
+        self.root.geometry("520x640")
         self.root.protocol("WM_DELETE_WINDOW", self.stop)
 
-        hud = tk.LabelFrame(self.root, text="Live Drone Status", font=("Helvetica", 12, "bold"))
-        hud.pack(fill="x", padx=10, pady=10, ipady=8)
+        tk.Label(self.root, text="Drone Fleet Dashboard",
+                 font=("Helvetica", 14, "bold")).pack(pady=8)
 
-        self.lbl_status = tk.Label(hud, text="STATUS: IDLE", font=("Helvetica", 14, "bold"), fg="grey")
-        self.lbl_status.pack(pady=4)
+        self.widgets = {}
 
-        self.lbl_message = tk.Label(hud, text="Drone idle. Awaiting diagnostic.", font=("Helvetica", 10), wraplength=340)
-        self.lbl_message.pack()
+        for cfg in DRONE_CONFIGS:
+            drone_id = cfg["id"]
+            frame = tk.LabelFrame(self.root, text=drone_id, font=("Helvetica", 11, "bold"))
+            frame.pack(fill="x", padx=12, pady=5, ipady=4)
 
-        self.lbl_battery  = tk.Label(hud, text="Battery: --",    font=("Helvetica", 10))
-        self.lbl_rotor    = tk.Label(hud, text="Rotor OK: --",   font=("Helvetica", 10))
-        self.lbl_sensors  = tk.Label(hud, text="Sensors OK: --", font=("Helvetica", 10))
-        self.lbl_comms    = tk.Label(hud, text="Comms OK: --",   font=("Helvetica", 10))
-        for lbl in (self.lbl_battery, self.lbl_rotor, self.lbl_sensors, self.lbl_comms):
-            lbl.pack()
+            top = tk.Frame(frame)
+            top.pack(fill="x", padx=8)
 
-        sc = tk.LabelFrame(self.root, text="Simulate Drone Scenario")
-        sc.pack(fill="x", padx=10, pady=5, ipady=4)
+            lbl_status = tk.Label(top, text="IDLE", font=("Helvetica", 12, "bold"), fg="grey", width=14, anchor="w")
+            lbl_status.pack(side="left")
 
-        def btn(parent, text, **kwargs):
-            tk.Button(parent, text=text, height=2, command=lambda: self.set_scenario(**kwargs)).pack(fill="x", padx=8, pady=3)
+            lbl_battery = tk.Label(top, text="Battery: --", font=("Helvetica", 10))
+            lbl_battery.pack(side="left", padx=8)
 
-        btn(sc, "Healthy (READY)",             battery=85.0, rotor_ok=True,  sensors_ok=True,  comms_ok=True)
-        btn(sc, "Low Battery (CHARGING)",      battery=35.0, rotor_ok=True,  sensors_ok=True,  comms_ok=True)
-        btn(sc, "Rotor Failure (MAINTENANCE)", battery=75.0, rotor_ok=False, sensors_ok=True,  comms_ok=True)
-        btn(sc, "No Comms (OFFLINE)",          battery=80.0, rotor_ok=True,  sensors_ok=True,  comms_ok=False)
+            lbl_rotor = tk.Label(top, text="Rotor: --", font=("Helvetica", 10))
+            lbl_rotor.pack(side="left", padx=4)
 
-        ctrl = tk.LabelFrame(self.root, text="Controls")
-        ctrl.pack(fill="x", padx=10, pady=5, ipady=4)
+            lbl_sensors = tk.Label(top, text="Sensors: --", font=("Helvetica", 10))
+            lbl_sensors.pack(side="left", padx=4)
 
-        tk.Button(ctrl, text="Run Diagnostic", height=2, bg="lightblue",
-                  command=self.run_diagnostic).pack(fill="x", padx=8, pady=3)
-        tk.Button(ctrl, text="Reset to Idle", height=2,
-                  command=self.reset_drone).pack(fill="x", padx=8, pady=3)
+            lbl_comms = tk.Label(top, text="Comms: --", font=("Helvetica", 10))
+            lbl_comms.pack(side="left", padx=4)
+
+            bottom = tk.Frame(frame)
+            bottom.pack(fill="x", padx=8, pady=2)
+
+            lbl_message = tk.Label(bottom, text="—", font=("Helvetica", 9), fg="grey", anchor="w", wraplength=460)
+            lbl_message.pack(side="left", fill="x", expand=True)
+
+            tk.Button(bottom, text="Re-diagnose",
+                      command=lambda did=drone_id: self.run_diagnostic(did)
+                      ).pack(side="right")
+
+            self.widgets[drone_id] = {
+                "status":  lbl_status,
+                "battery": lbl_battery,
+                "rotor":   lbl_rotor,
+                "sensors": lbl_sensors,
+                "comms":   lbl_comms,
+                "message": lbl_message,
+            }
+
+        tk.Button(self.root, text="Re-diagnose All Drones", height=2, bg="lightblue",
+                  command=self.run_all_diagnostics).pack(fill="x", padx=12, pady=10)
+
+    def run_diagnostic(self, drone_id):
+        # Reset to idle first, then trigger diagnostic
+        self.driver.send("go_idle", drone_id)
+        self.driver.send("run_diag", drone_id)
+
+    def run_all_diagnostics(self):
+        for drone_id in self.components:
+            self.run_diagnostic(drone_id)
 
     def start(self):
         self.root.mainloop()
 
     def stop(self):
-        self._logger.info("Shutting down...")
+        self._logger.info("Shutting down fleet dashboard...")
         self.driver.stop()
         self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
@@ -131,5 +199,5 @@ class DroneMonitorApp:
 
 
 if __name__ == "__main__":
-    app = DroneMonitorApp()
+    app = FleetDashboardApp()
     app.start()
