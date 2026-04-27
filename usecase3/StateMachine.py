@@ -92,3 +92,6 @@ confirming  = {"name": "Confirming payment","entry": "process_payment"}
 create      = {"name": "Create order",      "entry": "create_order; assign_track_num"}
 finding     = {"name": "Finding drone",     "entry": "find_delivery_drone"}
 preparing   = {"name": "Preparing drone",   "entry": "assign_delivery"}
+
+UC3_TRANSITIONS = [t0, t1, t2, t3, t4, t5, t6]
+UC3_STATES = [idle, confirming, create, finding, preparing]

@@ -80,8 +80,7 @@ class PcHudApp:
 
     # ------------------------------------------------------- UC2 setup
     def _setup_uc2(self):
-        self.uc2_pkg = PackageDeliveryComponent(self.mqtt_client)
-        self.uc2_pkg.package_id = "PKG-123"
+        self.uc2_pkg = PackageDeliveryComponent("PKG-123", self.mqtt_client)
         machine = stmpy.Machine(
             name="uc2_stm",
             transitions=UC2_TRANSITIONS,

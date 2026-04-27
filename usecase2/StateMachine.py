@@ -64,3 +64,6 @@ pickup = {'name': 'Ready for drone pickup', 'entry': 'on_pickup_ready'}
 transport = {'name': 'In transport', 'entry': 'on_transport'}
 at_place = {'name': 'At delivery place', 'entry': 'on_delivery_place; start_timer("t", 5000)'}
 ret_sender = {'name': 'Return to sender', 'entry': 'on_return'}
+
+UC2_TRANSITIONS = [t0, t1, t2, t3, t4, t5, t6, t7]
+UC2_STATES = [idle, notice, pickup, transport, at_place, ret_sender]
