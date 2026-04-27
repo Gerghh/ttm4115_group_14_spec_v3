@@ -38,6 +38,7 @@ class DroneComponent:
 
     def evaluate(self):
         t = self.telemetry
+        time.sleep(3)  # Simulate delay
         if not t["communication_ok"]:
             self.stm.send("result_offline")
         elif t["battery"] < BATTERY_THRESHOLD:

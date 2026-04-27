@@ -55,11 +55,13 @@ class OrderProcessComponent:
 
     def find_delivery_drone(self):
         print(f"[DRONE] Searching for available drone near {self.order['location'].get('pickup', '?')}...")
+        time.sleep(3)  # Simulate search delay
         self._publish("FINDING_DRONE", "Searching for an available drone for this delivery route.")
 
     def assign_delivery(self):
         drone_id = f"DRONE-{random.randint(1, 99):02d}"
         self.order["assigned_drone"] = drone_id
+        
         print(f"[DRONE] Drone {drone_id} assigned. Preparing delivery.")
         self._publish("PREPARING_DRONE", f"Drone {drone_id} assigned and preparing for pickup.")
 
