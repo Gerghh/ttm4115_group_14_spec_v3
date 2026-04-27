@@ -55,7 +55,7 @@ class OrderProcessComponent:
 
     def find_delivery_drone(self):
         print(f"[DRONE] Searching for available drone near {self.order['location'].get('pickup', '?')}...")
-        time.sleep(3)  # Simulate search delay
+        time.sleep(3)
         self._publish("FINDING_DRONE", "Searching for an available drone for this delivery route.")
 
     def assign_delivery(self):

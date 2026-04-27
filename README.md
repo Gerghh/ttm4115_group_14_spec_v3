@@ -1,237 +1,128 @@
-# Drone Readiness MVP — Use Case 1: Monitor Drone Availability
+# Drone Delivery System — TTM4115 Group 14
 
-A working end-to-end system for monitoring drone availability and readiness via Raspberry Pi agent diagnostics.
-
----
-
-## What This Use Case Does
-
-The backend maintains a registry of drones. When a diagnostic is requested for a drone, the backend contacts that drone's Raspberry Pi agent over REST. The Pi agent simulates a local hardware self-check (battery, rotors, sensors, communications) and returns the results. The backend applies state rules and updates the drone's status to one of:
-
-| Status        | Reason                                         |
-|---------------|------------------------------------------------|
-| `READY`       | Battery ≥ 60%, all hardware checks passed      |
-| `CHARGING`    | Battery < 60%                                  |
-| `MAINTENANCE` | Rotor or sensor check failed                   |
-| `OFFLINE`     | Pi agent unreachable or timed out              |
-| `ERROR`       | Unexpected internal failure                    |
-| `DIAGNOSTIC`  | Diagnostic in progress (transitional)          |
-| `IDLE`        | Known drone, not yet checked                   |
+A prototype drone delivery system built with MQTT and state machines (stmpy). The system covers three use cases: drone fleet diagnostics, package delivery tracking, and order registration.
 
 ---
 
-## Architecture
-
-```
-┌─────────────────────────────────────────┐
-│             Browser / curl              │
-│  GET /drones   POST /drones/{id}/diag   │
-└────────────────────┬────────────────────┘
-                     │
-         ┌───────────▼───────────┐
-         │   Backend (FastAPI)   │
-         │   SQLite via SQLAlch. │
-         └───┬──────┬──────┬─────┘
-             │      │      │
-      port 8001   8002   8003  (8004 = no agent → OFFLINE)
-             │      │      │
-         ┌───▼──┐ ┌─▼───┐ ┌▼────┐
-         │Pi-001│ │Pi-002│ │Pi-003│
-         │Alpha │ │Beta  │ │Gamma │
-         └──────┘ └─────┘ └──────┘
-```
-
-**Backend → Pi agent communication:**  
-`POST http://<agent_host>:<port>/diagnostic`  
-The backend stores an `agent_url` per drone and calls `POST /diagnostic` on it. If the agent is unreachable or times out (10 s), the drone is marked `OFFLINE`.
-
----
-
-## Project Structure
-
-```
-backend/
-  app/
-    api/          health.py, drones.py
-    models/       drone.py, diagnostic.py
-    schemas/      drone.py, diagnostic.py
-    services/     diagnostic_service.py
-    db/           database.py, seed.py
-    main.py       FastAPI app + lifespan
-  main.py         Uvicorn entry point
-  requirements.txt
-
-pi_agent/
-  main.py         Pi agent (configurable via env vars)
-  requirements.txt
-  .env.example
-
-frontend_optional/
-  index.html      Single-page dashboard
-
-tests/
-  conftest.py
-  test_drones.py
-  test_diagnostic.py
-
-run_demo.sh       Start everything with one command
-```
-
----
-
-## How to Run the Backend
+## Dependencies
 
 ```bash
-cd backend
-pip install -r requirements.txt
-python main.py
+pip install paho-mqtt stmpy
 ```
 
-The backend starts on **http://localhost:8000**.  
-Auto-seeds 4 demo drones on first run.
-
-- Dashboard:  http://localhost:8000  
-- API docs:   http://localhost:8000/docs  
-- Health:     http://localhost:8000/health  
-
----
-
-## How to Run a Pi Agent
-
-Each drone requires its own agent instance, configured via environment variables.
+For Raspberry Pi hardware display:
 
 ```bash
-cd pi_agent
-pip install -r requirements.txt
-
-# Drone-Alpha: healthy
-PI_AGENT_ID=pi-001 PORT=8001 BATTERY_PERCENT=85.0 ROTOR_OK=true SENSORS_OK=true python main.py
-
-# Drone-Beta: low battery
-PI_AGENT_ID=pi-002 PORT=8002 BATTERY_PERCENT=35.0 ROTOR_OK=true SENSORS_OK=true python main.py
-
-# Drone-Gamma: rotor failure
-PI_AGENT_ID=pi-003 PORT=8003 BATTERY_PERCENT=72.0 ROTOR_OK=false SENSORS_OK=true python main.py
-```
-
-On a real Raspberry Pi, copy `pi_agent/` to the device and run it with the appropriate env vars pointing `BACKEND_URL` at the backend host.
-
----
-
-## Run Everything at Once (Demo)
-
-```bash
-chmod +x run_demo.sh
-./run_demo.sh
-```
-
-This starts 3 Pi agents (ports 8001–8003) and the backend (port 8000). Drone-Delta intentionally has no agent to demo the OFFLINE state.
-
----
-
-## How to Seed / Reset Demo Data
-
-```bash
-# Seed happens automatically on backend startup.
-# To reset manually:
-curl -X POST http://localhost:8000/seed
-```
-
-Or click **Reset Demo Data** in the dashboard.
-
----
-
-## API Reference
-
-| Method | Path                        | Description                          |
-|--------|-----------------------------|--------------------------------------|
-| GET    | `/health`                   | Backend health check                 |
-| GET    | `/drones`                   | List all drones with current status  |
-| GET    | `/drones/{id}`              | Get a single drone                   |
-| POST   | `/drones/{id}/diagnostic`   | Trigger a diagnostic check           |
-| POST   | `/seed`                     | Wipe and re-seed demo data           |
-
-### Example: trigger a diagnostic
-
-```bash
-curl -X POST http://localhost:8000/drones/1/diagnostic | python -m json.tool
-```
-
-Response:
-```json
-{
-  "id": 1,
-  "drone_id": 1,
-  "battery_percent": 85.0,
-  "rotor_ok": true,
-  "sensors_ok": true,
-  "communication_ok": true,
-  "computed_status": "READY",
-  "message": "All systems nominal. Drone is ready for deployment.",
-  "checked_at": "2026-04-20T12:00:00+00:00"
-}
+pip install sense-hat
 ```
 
 ---
 
-## Testing the Four Drone States
+## Project structure
 
-### READY — Drone-Alpha (id: 1)
-Requires pi-agent on port 8001 running with `BATTERY_PERCENT=85 ROTOR_OK=true SENSORS_OK=true`.
-
-```bash
-curl -X POST http://localhost:8000/drones/1/diagnostic
-# computed_status: "READY"
 ```
-
-### CHARGING — Drone-Beta (id: 2)
-Requires pi-agent on port 8002 running with `BATTERY_PERCENT=35`.
-
-```bash
-curl -X POST http://localhost:8000/drones/2/diagnostic
-# computed_status: "CHARGING"
-```
-
-### MAINTENANCE — Drone-Gamma (id: 3)
-Requires pi-agent on port 8003 running with `ROTOR_OK=false`.
-
-```bash
-curl -X POST http://localhost:8000/drones/3/diagnostic
-# computed_status: "MAINTENANCE"
-```
-
-### OFFLINE — Drone-Delta (id: 4)
-No agent is running on port 8004. The backend times out and marks the drone offline.
-
-```bash
-curl -X POST http://localhost:8000/drones/4/diagnostic
-# computed_status: "OFFLINE"
+demo/                  — Unified PC demo app (all three use cases)
+usecase1/              — UC1: Drone fleet diagnostics
+usecase2/              — UC2: Package delivery tracking
+usecase3/              — UC3: Order registration and processing
 ```
 
 ---
 
-## Running Tests
+## Running the demo
+
+### PC (full demo)
 
 ```bash
-cd backend
-# use the project venv or install deps first
-python -m pytest tests/ -v
+cd demo
+python app.py
 ```
 
-Tests live in `backend/tests/` and use an in-memory SQLite database with all Pi agent HTTP calls mocked — no agents need to be running.
+### PC HUD with Raspberry Pi display
 
-> **Note:** Run pytest from inside `backend/`, not from the project root. The project root contains `code.py` which shadows Python's stdlib `code` module and breaks pytest's debugger setup.
+Run on the PC:
+
+```bash
+cd usecase2
+python pc_hud.py
+```
+
+Run on the Raspberry Pi (requires SenseHAT):
+
+```bash
+python new_pi_drone.py
+```
+
+Both devices only need an internet connection — they communicate through the public HiveMQ MQTT broker automatically.
 
 ---
 
-## State Transition Rules
+## Use cases
 
-```
-communication_ok == False  →  OFFLINE
-battery_percent  <  60     →  CHARGING
-rotor_ok == False          →  MAINTENANCE
-sensors_ok == False        →  MAINTENANCE
-(all pass)                 →  READY
-```
+### UC1 — Drone Fleet Diagnostics
 
-Priority order: OFFLINE > CHARGING > MAINTENANCE > READY.
+Manages the status of a drone through diagnostics, deployment, and fault handling.
+
+**States:** Idle → Diagnostic → Ready / Charging / Maintenance / Broken / Offline / Delivering
+
+| Button | Effect |
+|---|---|
+| Run Diagnostic | Runs a 3-second diagnostic, then transitions to the appropriate result state |
+| Low Battery (10%) | Sets battery to 10% and moves drone to Charging (auto-returns to Ready after 3s) |
+| Drone Broken | Moves drone to Broken state |
+| Send to Maintenance | Moves broken drone to Maintenance (auto-returns to Ready after 3s) |
+| Drone Busy / Free | Toggles between Ready and Delivering |
+| Reset to Idle | Returns drone to Idle from most states |
+
+**MQTT topic:** `drone/{drone_id}/status`
+
+---
+
+### UC2 — Package Delivery Tracking
+
+Tracks a package through its full delivery lifecycle.
+
+**States:** Idle → Notice of package → Ready for drone pickup → In transport → At delivery place → Return to sender → Idle
+
+| Button | Effect |
+|---|---|
+| Send Package | Notifies system a package is ready |
+| Arrive at Pickup | Package arrives at the pickup point |
+| Pick Up | Drone picks up the package |
+| Drop Off | Drone drops off the package |
+| Confirm Delivery | Delivery confirmed — resets to Idle |
+| Package Returned | Package returned to sender — resets to Idle |
+
+If delivery is not confirmed within 8 seconds of drop-off, the drone automatically returns the package to the sender.
+
+**MQTT topic:** `delivery/{package_id}/status`
+
+---
+
+### UC3 — Order Registration
+
+Handles the full order flow from placement to drone dispatch.
+
+**States:** No order → Confirming payment → Create order → Finding drone → Preparing drone → No order
+
+| Button | Effect |
+|---|---|
+| Place Order | Submits order details and initiates payment |
+| Payment Confirmed | Confirms payment, creates order, then finds a drone after 3s |
+| Payment Failed | Cancels the order and returns to idle |
+| Drone Found | Assigns a drone and begins preparation |
+| Drone Dispatched | Sends dispatch confirmation and resets to idle |
+
+**MQTT topic:** `order/status`
+
+---
+
+## Raspberry Pi display
+
+`new_pi_drone.py` subscribes to all three MQTT topics and displays status updates on a SenseHAT LED matrix. Each state has a unique label and colour. A 3-second cooldown prevents back-to-back updates from overlapping on the display.
+
+| Usecase | Example states shown |
+|---|---|
+| UC1 | IDLE, DIAG, READY, CHARGE, MAINT, BROKEN |
+| UC2 | IDLE, NOTICE, READY, TRANSIT, ARRIVED, RETURN |
+| UC3 | IDLE, PAYMENT, ORDER, FINDING, PREP |

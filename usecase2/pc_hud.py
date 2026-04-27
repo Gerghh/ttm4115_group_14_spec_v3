@@ -50,7 +50,6 @@ class PcHudApp:
 
         self._build_gui()
 
-    # ------------------------------------------------------------------ MQTT
     def on_connect(self, client, userdata, flags, rc, properties=None):
         self.mqtt_client.subscribe("drone/+/status")
         self.mqtt_client.subscribe("delivery/+/status")
@@ -69,7 +68,6 @@ class PcHudApp:
         except Exception:
             pass
 
-    # ------------------------------------------------------- UC1 setup
     def _setup_uc1(self):
         self.uc1_drone = DroneComponent("DEMO-01", self.mqtt_client)
         machine = stmpy.Machine(
@@ -81,7 +79,6 @@ class PcHudApp:
         self.uc1_drone.stm = machine
         self.driver.add_machine(machine)
 
-    # ------------------------------------------------------- UC2 setup
     def _setup_uc2(self):
         self.uc2_pkg = PackageDeliveryComponent("PKG-123", self.mqtt_client)
         machine = stmpy.Machine(
@@ -93,7 +90,6 @@ class PcHudApp:
         self.uc2_pkg.stm = machine
         self.driver.add_machine(machine)
 
-    # ------------------------------------------------------- UC3 setup
     def _setup_uc3(self):
         self.uc3_order = OrderProcessComponent(self.mqtt_client)
         machine = stmpy.Machine(
@@ -105,7 +101,6 @@ class PcHudApp:
         self.uc3_order.stm = machine
         self.driver.add_machine(machine)
 
-    # --------------------------------------------------- HUD update callbacks
     def _update_uc1(self, data):
         s = data.get("status", "?")
         self.uc1_lbl_status.config(text=f"STATE: {s}", fg=UC1_COLORS.get(s, "black"))
@@ -153,7 +148,6 @@ class PcHudApp:
             self.uc2_lbl_eta.config(text="ETA: --")
             self._uc2_publish_idle()
 
-    # ----------------------------------------------------------- GUI builder
     def _build_gui(self):
         self.root = tk.Tk()
         self.root.title("PC Mission Control HUD")
@@ -173,7 +167,6 @@ class PcHudApp:
     def _send(self, trigger, machine):
         self.driver.send(trigger, machine)
 
-    # ----------------------------------------------------------- UC1 tab
     def _build_uc1_tab(self, parent):
         frame = tk.Frame(parent)
 
@@ -199,7 +192,6 @@ class PcHudApp:
         self._btn(ctrl, "Send to Maintenance", lambda: self._send("send_to_maintenance", "uc1_stm"))
         return frame
 
-    # ----------------------------------------------------------- UC2 tab
     def _build_uc2_tab(self, parent):
         frame = tk.Frame(parent)
 
@@ -226,7 +218,6 @@ class PcHudApp:
                  fg="grey", font=("Helvetica", 8)).pack(pady=4)
         return frame
 
-    # ----------------------------------------------------------- UC3 tab
     def _build_uc3_tab(self, parent):
         frame = tk.Frame(parent)
 
@@ -256,7 +247,6 @@ class PcHudApp:
         )
         self._send("order_sent", "uc3_stm")
 
-    # ----------------------------------------------------------------- run
     def start(self):
         self.root.mainloop()
 

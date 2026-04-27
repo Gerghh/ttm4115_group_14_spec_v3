@@ -17,7 +17,6 @@ class PackageDeliveryComponent:
         }
 
     def _publish_update(self, state_name):
-        """Sends a JSON payload over MQTT representing the current system state."""
         payload = {
             "package_id": self.package_id,
             "status": state_name,

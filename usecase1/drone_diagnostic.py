@@ -6,7 +6,6 @@ import logging
 
 from StateMachine import DroneComponent, ALL_TRANSITIONS, ALL_STATES
 
-# Pre-configured fleet — mirrors the UC-1 demo scenarios
 DRONE_CONFIGS = [
     {"id": "Drone-Alpha", "battery": 85.0, "rotor_ok": True,  "sensors_ok": True,  "communication_ok": True},
     {"id": "Drone-Beta",  "battery": 35.0, "rotor_ok": True,  "sensors_ok": True,  "communication_ok": True},
@@ -30,15 +29,13 @@ class FleetDashboardApp:
         logging.basicConfig(level=logging.INFO)
         self._logger = logging.getLogger(__name__)
 
-        # MQTT
         self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.mqtt_client.on_connect = self.on_connect
         self.mqtt_client.on_message = self.on_message
         self.mqtt_client.connect("broker.hivemq.com", 1883)
         self.mqtt_client.loop_start()
 
-        # Build one stmpy machine per drone
-        self.components = {}   # drone_id → DroneComponent
+        self.components = {}
         self.driver = stmpy.Driver()
 
         for cfg in DRONE_CONFIGS:
@@ -64,18 +61,12 @@ class FleetDashboardApp:
 
         self.create_gui()
 
-        # Run initial diagnostic for every drone so the dashboard shows real statuses
         for drone_id in self.components:
             self.driver.send("run_diag", drone_id)
 
-    # ------------------------------------------------------------------
-    # MQTT callbacks
-    # ------------------------------------------------------------------
     def on_connect(self, client, userdata, flags, reason_code, properties):
         self._logger.info("Connected to MQTT broker.")
-        # Own drone diagnostics
         self.mqtt_client.subscribe("drone/+/status")
-        # UC-2 delivery events — tells us when a drone is out on a job
         self.mqtt_client.subscribe("delivery/+/status")
 
     def on_message(self, client, userdata, msg):
@@ -86,10 +77,8 @@ class FleetDashboardApp:
 
         topic = msg.topic
         if topic.startswith("drone/"):
-            # Own diagnostic update
             self.root.after(0, self.handle_drone_status, data)
         elif topic.startswith("delivery/"):
-            # UC-2 delivery update
             self.root.after(0, self.handle_delivery_status, data)
 
     def handle_drone_status(self, data):
@@ -107,7 +96,6 @@ class FleetDashboardApp:
         w["comms"].config(text=f"Comms: {'OK' if t['communication_ok'] else 'FAIL'}", fg="green" if t["communication_ok"] else "red")
 
     def handle_delivery_status(self, data):
-        # UC-2 publishes which drone is doing the delivery
         drone_id = data.get("drone_id")
         uc2_status = data.get("status", "")
 
@@ -119,9 +107,6 @@ class FleetDashboardApp:
         elif uc2_status == "Idle":
             self.driver.send("drone_free", drone_id)
 
-    # ------------------------------------------------------------------
-    # GUI
-    # ------------------------------------------------------------------
     def create_gui(self):
         self.root = tk.Tk()
         self.root.title("UC-1: Drone Fleet Dashboard")
@@ -179,7 +164,6 @@ class FleetDashboardApp:
                   command=self.run_all_diagnostics).pack(fill="x", padx=12, pady=10)
 
     def run_diagnostic(self, drone_id):
-        # Reset to idle first, then trigger diagnostic
         self.driver.send("go_idle", drone_id)
         self.driver.send("run_diag", drone_id)
 

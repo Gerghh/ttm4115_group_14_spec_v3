@@ -12,7 +12,6 @@ except ImportError:
     HARDWARE_MODE = False
     print("⚠️ sense_hat not found. Running in software-only mode.")
 
-# UC1 - Drone diagnostics  (drone/+/status)
 UC1_DISPLAY = {
     "IDLE":        ("IDLE",      (0,   0,   255)),
     "DIAGNOSTIC":  ("DIAG",      (255, 165, 0)),
@@ -24,7 +23,6 @@ UC1_DISPLAY = {
     "DELIVERING":  ("DELIVER",   (180, 0,   180)),
 }
 
-# UC2 - Package delivery  (delivery/+/status)
 UC2_DISPLAY = {
     "Idle":                   ("IDLE",     (0,   0,   255)),
     "Notice of package":      ("NOTICE",   (0,   255, 255)),
@@ -34,7 +32,6 @@ UC2_DISPLAY = {
     "Return to sender":       ("RETURN",   (255, 0,   0)),
 }
 
-# UC3 - Order processing  (order/status)
 UC3_DISPLAY = {
     "IDLE":               ("IDLE",    (0,   0,   255)),
     "CONFIRMING_PAYMENT": ("PAYMENT", (255, 200, 0)),

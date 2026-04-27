@@ -6,7 +6,6 @@ import time
 import logging
 
 <<<<<<< HEAD
-#components
 =======
 
 ASSIGNED_DRONE = "Drone-Alpha"  # Which UC-1 fleet drone is doing this delivery
@@ -20,7 +19,7 @@ class PackageDeliveryComponent:
         self.topic = f"delivery/{package_id}/status"
 
         self.telemetry = {
-            "pos": [63.4305, 10.3951], # coordinated for Trondheim
+            "pos": [63.4305, 10.3951],
             "battery": 100,
             "speed": 0,
             "eta": "Calculating..."
@@ -29,7 +28,7 @@ class PackageDeliveryComponent:
     def _publish_update(self, state_name):
         payload = {
             "package_id": self.package_id,
-            "drone_id": ASSIGNED_DRONE,  # UC-1 fleet dashboard listens for this
+            "drone_id": ASSIGNED_DRONE,
             "status": state_name,
             "telemetry": self.telemetry,
             "timestamp": time.time()
@@ -47,7 +46,7 @@ class PackageDeliveryComponent:
         self._publish_update("Ready for drone pickup")
 
     def on_transport(self):
-        self.telemetry["speed"] = 45 # km/h
+        self.telemetry["speed"] = 45
         self.telemetry["battery"] -= 5
         self.telemetry["eta"] = "12 mins"
         self._publish_update("In transport")
@@ -67,7 +66,6 @@ class PackageDeliveryComponent:
 
 
 <<<<<<< HEAD
-# State Machine Def
 =======
 >>>>>>> f9629dd9d34214c541272a858fd6db34f9a04c17
 t0 = {'source': 'initial', 'target': 'Idle'}
@@ -83,12 +81,12 @@ idle = {'name': 'Idle', 'entry': 'on_idle'}
 notice = {'name': 'Notice of package', 'entry': 'on_notice'}
 pickup = {'name': 'Ready for drone pickup', 'entry': 'on_pickup_ready'}
 transport = {'name': 'In transport', 'entry': 'on_transport'}
-at_place = {'name': 'At delivery place', 'entry': 'on_delivery_place; start_timer("t", 8000)'} # 8 second timer
+at_place = {'name': 'At delivery place', 'entry': 'on_delivery_place; start_timer("t", 8000)'}
 ret_sender = {'name': 'Return to sender', 'entry': 'on_return'}
 
 <<<<<<< HEAD
 
-#hud
+
 =======
 >>>>>>> f9629dd9d34214c541272a858fd6db34f9a04c17
 class DroneHUDApp:
@@ -134,21 +132,18 @@ class DroneHUDApp:
         self.mqtt_client.subscribe(self.topic)
 
     def on_message(self, client, userdata, msg):
-        """Receives MQTT JSON and updates the GUI HUD safely."""
         payload_str = msg.payload.decode('utf-8')
         data = json.loads(payload_str)
 
         self.root.after(0, self.update_hud_display, data)
 
     def update_hud_display(self, data):
-        """Formats the JSON data into the HUD labels."""
         self.lbl_status.config(text=f"STATE: {data['status'].upper()}", fg="blue")
         self.lbl_battery.config(text=f"Battery: {data['telemetry']['battery']}%")
         self.lbl_speed.config(text=f"Speed: {data['telemetry']['speed']} km/h")
         self.lbl_eta.config(text=f"ETA: {data['telemetry']['eta']}")
 
     def send_trigger(self, trigger_name):
-        """Sends a trigger to the STMPY state machine."""
         self._logger.info(f"Sending trigger: {trigger_name}")
         self.driver.send(trigger_name, 'package_stm')
 

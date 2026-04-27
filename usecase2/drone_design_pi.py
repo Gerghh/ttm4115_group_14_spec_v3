@@ -4,25 +4,32 @@ import stmpy
 import json
 import time
 import logging
-import gpiozero
+import threading
 
-# --- NEW: Try to import Raspberry Pi GPIO tools ---
 try:
-    from gpiozero import RGBLED
+    from sense_hat import SenseHat
     HARDWARE_MODE = True
 except ImportError:
     HARDWARE_MODE = False
-    print("⚠️ gpiozero not found. Running in software-only mode (No physical LED).")
+    print("⚠️ sense_hat not found. Running in software-only mode (No SenseHAT display).")
 
-#components
+STATE_DISPLAY = {
+    "IDLE":                    ("IDLE",       (0,   0,   255)),
+    "NOTICE OF PACKAGE":       ("NOTICE",     (0,   255, 255)),
+    "READY FOR DRONE PICKUP":  ("READY",      (255, 255, 0)),
+    "IN TRANSPORT":            ("TRANSPORT",  (0,   200, 0)),
+    "AT DELIVERY PLACE":       ("ARRIVED",    (180, 0,   180)),
+    "RETURN TO SENDER":        ("RETURN",     (255, 0,   0)),
+}
+
 class PackageDeliveryComponent:
     def __init__(self, package_id, mqtt_client):
         self.package_id = package_id
         self.mqtt_client = mqtt_client
         self.topic = f"delivery/{package_id}/status"
-        
+
         self.telemetry = {
-            "pos": [63.4305, 10.3951], # coordinated for Trondheim
+            "pos": [63.4305, 10.3951],
             "battery": 100,
             "speed": 0,
             "eta": "Calculating..."
@@ -43,12 +50,12 @@ class PackageDeliveryComponent:
 
     def on_notice(self):
         self._publish_update("Notice of package")
-        
+
     def on_pickup_ready(self):
         self._publish_update("Ready for drone pickup")
 
     def on_transport(self):
-        self.telemetry["speed"] = 45 # km/h
+        self.telemetry["speed"] = 45
         self.telemetry["battery"] -= 5
         self.telemetry["eta"] = "12 mins"
         self._publish_update("In transport")
@@ -67,7 +74,6 @@ class PackageDeliveryComponent:
         print(f"[{self.package_id}] Cleaned up resources.")
 
 
-# State Machine Def
 t0 = {'source': 'initial', 'target': 'Idle'}
 t1 = {'trigger': 'package_sent', 'source': 'Idle', 'target': 'Notice of package'}
 t2 = {'trigger': 'package_at_pickup', 'source': 'Notice of package', 'target': 'Ready for drone pickup'}
@@ -81,11 +87,10 @@ idle = {'name': 'Idle', 'entry': 'on_idle'}
 notice = {'name': 'Notice of package', 'entry': 'on_notice'}
 pickup = {'name': 'Ready for drone pickup', 'entry': 'on_pickup_ready'}
 transport = {'name': 'In transport', 'entry': 'on_transport'}
-at_place = {'name': 'At delivery place', 'entry': 'on_delivery_place; start_timer("t", 8000)'} # 8 second timer
+at_place = {'name': 'At delivery place', 'entry': 'on_delivery_place; start_timer("t", 8000)'}
 ret_sender = {'name': 'Return to sender', 'entry': 'on_return'}
 
 
-#hud
 class DroneHUDApp:
     def __init__(self):
         logging.basicConfig(level=logging.INFO)
@@ -93,26 +98,20 @@ class DroneHUDApp:
         self.package_id = "PKG-123"
         self.topic = f"delivery/{self.package_id}/status"
 
-        # --- NEW: Setup the physical LED ---
+        self.sense = SenseHat() if HARDWARE_MODE else None
         if HARDWARE_MODE:
-            # Assumes an RGB LED connected to GPIO pins 17, 27, and 22
-            self.led = RGBLED(red=17, green=27, blue=22)
-            self._logger.info("Hardware LED initialized.")
-        else:
-            self.led = None
+            self._logger.info("SenseHAT initialized.")
 
-        #MQTT Client Setup
         self.mqtt_client = mqtt.Client()
         self.mqtt_client.on_connect = self.on_connect
         self.mqtt_client.on_message = self.on_message
         self.mqtt_client.connect("broker.hivemq.com", 1883)
         self.mqtt_client.loop_start()
 
-        #STMPY State Machine Setup
         self.delivery_logic = PackageDeliveryComponent(self.package_id, self.mqtt_client)
         self.machine = stmpy.Machine(
-            name='package_stm', 
-            transitions=[t0, t1, t2, t3, t4, t5, t6, t7], 
+            name='package_stm',
+            transitions=[t0, t1, t2, t3, t4, t5, t6, t7],
             obj=self.delivery_logic,
             states=[idle, notice, pickup, transport, at_place, ret_sender]
         )
@@ -120,56 +119,36 @@ class DroneHUDApp:
         self.driver.add_machine(self.machine)
         self.driver.start()
 
-        #GUI Setup
         self.create_gui()
 
     def on_connect(self, client, userdata, flags, reason_code, properties):
         self._logger.info(f'Connected to MQTT broker.')
-        # Subscribe to our own drone's status topic to feed the HUD
         self.mqtt_client.subscribe(self.topic)
 
     def on_message(self, client, userdata, msg):
-        """Receives MQTT JSON and updates the GUI HUD safely."""
         payload_str = msg.payload.decode('utf-8')
         data = json.loads(payload_str)
-        
-        # We use root.after to safely update the Tkinter UI from the MQTT thread
         self.root.after(0, self.update_hud_display, data)
 
     def update_hud_display(self, data):
-        """Formats the JSON data into the HUD labels AND updates the LED."""
         state_str = data['status'].upper()
-        
-        # 1. Update the Screen
+
         self.lbl_status.config(text=f"STATE: {state_str}", fg="blue")
         self.lbl_battery.config(text=f"Battery: {data['telemetry']['battery']}%")
         self.lbl_speed.config(text=f"Speed: {data['telemetry']['speed']} km/h")
         self.lbl_eta.config(text=f"ETA: {data['telemetry']['eta']}")
 
-        # 2. Update the Physical LED (if on a Raspberry Pi)
-        if self.led:
-            self.update_physical_led(state_str)
+        if self.sense:
+            self.update_sense_display(state_str)
 
-    def update_physical_led(self, state_str):
-        """Changes the LED color based on the current state machine status."""
-        # RGB values are mapped from 0.0 to 1.0 (e.g., (1, 0, 0) is pure Red)
-        if state_str == "IDLE":
-            self.led.color = (0, 0, 1)        # Blue
-        elif state_str == "NOTICE OF PACKAGE":
-            self.led.color = (0, 1, 1)        # Cyan
-        elif state_str == "READY FOR DRONE PICKUP":
-            self.led.color = (1, 1, 0)        # Yellow
-        elif state_str == "IN TRANSPORT":
-            self.led.color = (0, 1, 0)        # Green
-        elif state_str == "AT DELIVERY PLACE":
-            self.led.color = (1, 0, 1)        # Purple
-        elif state_str == "RETURN TO SENDER":
-            self.led.color = (1, 0, 0)        # Red
-        else:
-            self.led.off()
+    def update_sense_display(self, state_str):
+        label, color = STATE_DISPLAY.get(state_str, ("?", (255, 255, 255)))
+        def _run():
+            self.sense.show_message(label, text_colour=color, back_colour=(0, 0, 0), scroll_speed=0.06)
+            self.sense.clear(*color)
+        threading.Thread(target=_run, daemon=True).start()
 
     def send_trigger(self, trigger_name):
-        """Sends a trigger to the STMPY state machine."""
         self._logger.info(f"Sending trigger: {trigger_name}")
         self.driver.send(trigger_name, 'package_stm')
 
@@ -179,7 +158,6 @@ class DroneHUDApp:
         self.root.geometry("350x550")
         self.root.protocol("WM_DELETE_WINDOW", self.stop)
 
-        #Frame of the HUD
         hud_frame = tk.LabelFrame(self.root, text="Live Telemetry HUD", font=('Helvetica', 12, 'bold'))
         hud_frame.pack(fill="x", padx=10, pady=10, ipady=10)
 
@@ -195,7 +173,6 @@ class DroneHUDApp:
         self.lbl_eta = tk.Label(hud_frame, text="ETA: --", font=('Helvetica', 11))
         self.lbl_eta.pack()
 
-        # Controls Frame
         ctrl_frame = tk.LabelFrame(self.root, text="System Controls (Send Triggers)")
         ctrl_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
@@ -209,7 +186,6 @@ class DroneHUDApp:
         add_btn(ctrl_frame, "5. Confirm Delivery (delivered)", "delivered")
         add_btn(ctrl_frame, "6. Package Returned (returned)", "returned")
 
-        # Warning text for the timer
         tk.Label(ctrl_frame, text="Note: If 'Delivered' isn't clicked within 8\nseconds of Drop Off, drone returns to sender.", fg="grey", font=("Helvetica", 8)).pack(pady=5)
 
     def start(self):
@@ -217,12 +193,13 @@ class DroneHUDApp:
 
     def stop(self):
         self._logger.info("Stopping System...")
+        if self.sense:
+            self.sense.clear()
         self.driver.stop()
         self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
         self.root.destroy()
 
-# running
 if __name__ == "__main__":
     app = DroneHUDApp()
     app.start()

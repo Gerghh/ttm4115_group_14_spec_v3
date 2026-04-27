@@ -17,7 +17,7 @@ class PackageDeliveryComponent:
         self.mqtt_client = mqtt_client
         self.led = led
         self.status_topic = f"delivery/{package_id}/status"
-        
+
         self.telemetry = {"pos": [63.43, 10.39], "battery": 100, "speed": 0, "eta": "Ready"}
 
     def _publish_update(self, state_name, led_color=None):
@@ -29,40 +29,39 @@ class PackageDeliveryComponent:
         }
         self.mqtt_client.publish(self.status_topic, json.dumps(payload))
         print(f"[{state_name}] Published to PC.")
-        
+
         if self.led and led_color:
             self.led.color = led_color
 
     def on_idle(self):
         self.telemetry["speed"] = 0
-        self._publish_update("Idle", (0, 0, 1)) # Blue
+        self._publish_update("Idle", (0, 0, 1))
 
     def on_notice(self):
-        self._publish_update("Notice of package", (0, 1, 1)) # Cyan
-        
+        self._publish_update("Notice of package", (0, 1, 1))
+
     def on_pickup_ready(self):
-        self._publish_update("Ready for drone pickup", (1, 1, 0)) # Yellow
+        self._publish_update("Ready for drone pickup", (1, 1, 0))
 
     def on_transport(self):
         self.telemetry["speed"] = 45
         self.telemetry["battery"] -= 5
         self.telemetry["eta"] = "12 mins"
-        self._publish_update("In transport", (0, 1, 0)) # Green
+        self._publish_update("In transport", (0, 1, 0))
 
     def on_delivery_place(self):
         self.telemetry["speed"] = 0
         self.telemetry["eta"] = "Arrived"
-        self._publish_update("At delivery place", (1, 0, 1)) # Purple
+        self._publish_update("At delivery place", (1, 0, 1))
 
     def on_return(self):
         self.telemetry["speed"] = 45
         self.telemetry["eta"] = "Returning..."
-        self._publish_update("Return to sender", (1, 0, 0)) # Red
+        self._publish_update("Return to sender", (1, 0, 0))
 
     def remove_package(self):
         print("Cleaned up resources.")
 
-# State Machine Definitions
 t0 = {'source': 'initial', 'target': 'Idle'}
 t1 = {'trigger': 'package_sent', 'source': 'Idle', 'target': 'Notice of package'}
 t2 = {'trigger': 'package_at_pickup', 'source': 'Notice of package', 'target': 'Ready for drone pickup'}
@@ -84,21 +83,19 @@ class PiDroneNode:
     def __init__(self):
         self.package_id = "PKG-123"
         self.command_topic = f"delivery/{self.package_id}/command"
-        
+
         self.led = RGBLED(red=17, green=27, blue=22) if HARDWARE_MODE else None
 
-        # 1. Setup MQTT
         self.mqtt_client = mqtt.Client()
         self.mqtt_client.on_connect = self.on_connect
         self.mqtt_client.on_message = self.on_message
         self.mqtt_client.connect("broker.hivemq.com", 1883)
         self.mqtt_client.loop_start()
 
-        # 2. Setup STMPY Machine
         self.delivery_logic = PackageDeliveryComponent(self.package_id, self.mqtt_client, self.led)
         self.machine = stmpy.Machine(
-            name='package_stm', 
-            transitions=[t0, t1, t2, t3, t4, t5, t6, t7], 
+            name='package_stm',
+            transitions=[t0, t1, t2, t3, t4, t5, t6, t7],
             obj=self.delivery_logic,
             states=[idle, notice, pickup, transport, at_place, ret_sender]
         )
@@ -111,7 +108,6 @@ class PiDroneNode:
         self.mqtt_client.subscribe(self.command_topic)
 
     def on_message(self, client, userdata, msg):
-        """Receives a button click from the PC and triggers the state machine."""
         trigger = msg.payload.decode('utf-8')
         print(f"Received command from PC: {trigger}")
         self.driver.send(trigger, 'package_stm')
