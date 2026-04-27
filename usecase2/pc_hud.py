@@ -1,89 +1,241 @@
 import tkinter as tk
+from tkinter import ttk
 import paho.mqtt.client as mqtt
+import stmpy
 import json
 import logging
+import sys
+import os
 
-class DroneHUDApp:
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+from usecase1.StateMachine import DroneComponent,           ALL_TRANSITIONS, ALL_STATES
+from usecase2.StateMachine import PackageDeliveryComponent, UC2_TRANSITIONS, UC2_STATES
+from usecase3.StateMachine import OrderProcessComponent,    UC3_TRANSITIONS, UC3_STATES
+
+UC1_COLORS = {
+    "IDLE": "grey", "DIAGNOSTIC": "orange", "READY": "green",
+    "CHARGING": "royalblue", "MAINTENANCE": "darkorange",
+    "OFFLINE": "darkred", "DELIVERING": "purple",
+}
+UC2_COLORS = {
+    "Idle": "grey", "Notice of package": "orange",
+    "Ready for drone pickup": "royalblue", "In transport": "purple",
+    "At delivery place": "green", "Return to sender": "red",
+}
+UC3_COLORS = {
+    "IDLE": "grey", "CONFIRMING_PAYMENT": "orange", "CREATE_ORDER": "teal",
+    "FINDING_DRONE": "royalblue", "PREPARING_DRONE": "purple",
+}
+
+
+class PcHudApp:
     def __init__(self):
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(level=logging.WARNING)
         self._logger = logging.getLogger(__name__)
-        self.package_id = "PKG-123"
-        
-        # We listen to status, but we SEND commands
-        self.status_topic = f"delivery/{self.package_id}/status"
-        self.command_topic = f"delivery/{self.package_id}/command"
 
-        # 1. Setup MQTT
-        self.mqtt_client = mqtt.Client() # Removed VERSION2 for compatibility
+        self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.mqtt_client.on_connect = self.on_connect
         self.mqtt_client.on_message = self.on_message
         self.mqtt_client.connect("broker.hivemq.com", 1883)
         self.mqtt_client.loop_start()
 
-        # 2. Create GUI
-        self.create_gui()
+        self.driver = stmpy.Driver()
+        self._setup_uc1()
+        self._setup_uc2()
+        self._setup_uc3()
+        self.driver.start()
 
-    def on_connect(self, client, userdata, flags, rc):
-        self._logger.info('Connected to MQTT broker. Listening for drone data...')
-        self.mqtt_client.subscribe(self.status_topic)
+        self._build_gui()
+
+    # ------------------------------------------------------------------ MQTT
+    def on_connect(self, client, userdata, flags, rc, properties=None):
+        self.mqtt_client.subscribe("drone/+/status")
+        self.mqtt_client.subscribe("delivery/+/status")
+        self.mqtt_client.subscribe("order/status")
 
     def on_message(self, client, userdata, msg):
-        """Receives status from the Pi and updates the HUD."""
-        payload_str = msg.payload.decode('utf-8')
-        data = json.loads(payload_str)
-        self.root.after(0, self.update_hud_display, data)
+        try:
+            data = json.loads(msg.payload.decode("utf-8"))
+            topic = msg.topic
+            if topic.startswith("drone/"):
+                self.root.after(0, self._update_uc1, data)
+            elif topic.startswith("delivery/"):
+                self.root.after(0, self._update_uc2, data)
+            elif topic.startswith("order/"):
+                self.root.after(0, self._update_uc3, data)
+        except Exception:
+            pass
 
-    def update_hud_display(self, data):
-        """Updates the screen."""
-        self.lbl_status.config(text=f"STATE: {data['status'].upper()}", fg="blue")
-        self.lbl_battery.config(text=f"Battery: {data['telemetry']['battery']}%")
-        self.lbl_speed.config(text=f"Speed: {data['telemetry']['speed']} km/h")
-        self.lbl_eta.config(text=f"ETA: {data['telemetry']['eta']}")
+    # ------------------------------------------------------- UC1 setup
+    def _setup_uc1(self):
+        self.uc1_drone = DroneComponent("DEMO-01", self.mqtt_client)
+        machine = stmpy.Machine(
+            name="uc1_stm",
+            transitions=ALL_TRANSITIONS,
+            obj=self.uc1_drone,
+            states=ALL_STATES,
+        )
+        self.driver.add_machine(machine)
 
-    def send_command(self, trigger_name):
-        """Sends a command to the Pi to change states."""
-        self._logger.info(f"Sending command to Pi: {trigger_name}")
-        self.mqtt_client.publish(self.command_topic, trigger_name)
+    # ------------------------------------------------------- UC2 setup
+    def _setup_uc2(self):
+        self.uc2_pkg = PackageDeliveryComponent(self.mqtt_client)
+        self.uc2_pkg.package_id = "PKG-123"
+        machine = stmpy.Machine(
+            name="uc2_stm",
+            transitions=UC2_TRANSITIONS,
+            obj=self.uc2_pkg,
+            states=UC2_STATES,
+        )
+        self.driver.add_machine(machine)
 
-    def create_gui(self):
+    # ------------------------------------------------------- UC3 setup
+    def _setup_uc3(self):
+        self.uc3_order = OrderProcessComponent(self.mqtt_client)
+        machine = stmpy.Machine(
+            name="uc3_stm",
+            transitions=UC3_TRANSITIONS,
+            obj=self.uc3_order,
+            states=UC3_STATES,
+        )
+        self.driver.add_machine(machine)
+
+    # --------------------------------------------------- HUD update callbacks
+    def _update_uc1(self, data):
+        s = data.get("status", "?")
+        self.uc1_lbl_status.config(text=f"STATE: {s}", fg=UC1_COLORS.get(s, "black"))
+        t = data.get("telemetry", {})
+        self.uc1_lbl_battery.config(text=f"Battery: {t.get('battery', '--')}%")
+        self.uc1_lbl_rotors.config(text=f"Rotors OK: {t.get('rotor_ok', '--')}")
+        self.uc1_lbl_sensors.config(text=f"Sensors OK: {t.get('sensors_ok', '--')}")
+
+    def _update_uc2(self, data):
+        s = data.get("status", "?")
+        self.uc2_lbl_status.config(text=f"STATE: {s.upper()}", fg=UC2_COLORS.get(s, "black"))
+        t = data.get("telemetry", {})
+        self.uc2_lbl_battery.config(text=f"Battery: {t.get('battery', '--')}%")
+        self.uc2_lbl_speed.config(text=f"Speed: {t.get('speed', '--')} km/h")
+        self.uc2_lbl_eta.config(text=f"ETA: {t.get('eta', '--')}")
+
+    def _update_uc3(self, data):
+        s = data.get("status", "?")
+        self.uc3_lbl_status.config(text=f"STATE: {s}", fg=UC3_COLORS.get(s, "black"))
+        order = data.get("order", {})
+        self.uc3_lbl_tracking.config(text=f"Tracking: {order.get('tracking_number') or '--'}")
+        self.uc3_lbl_drone.config(text=f"Drone: {order.get('assigned_drone') or '--'}")
+
+    # ----------------------------------------------------------- GUI builder
+    def _build_gui(self):
         self.root = tk.Tk()
-        self.root.title("Drone Mission Control")
-        self.root.geometry("350x550")
+        self.root.title("PC Mission Control HUD")
+        self.root.geometry("400x560")
         self.root.protocol("WM_DELETE_WINDOW", self.stop)
 
-        hud_frame = tk.LabelFrame(self.root, text="Live Telemetry from Pi", font=('Helvetica', 12, 'bold'))
-        hud_frame.pack(fill="x", padx=10, pady=10, ipady=10)
+        nb = ttk.Notebook(self.root)
+        nb.pack(fill="both", expand=True, padx=8, pady=8)
 
-        self.lbl_status = tk.Label(hud_frame, text="STATE: WAITING FOR PI...", font=('Helvetica', 14, 'bold'), fg="red")
-        self.lbl_status.pack(pady=5)
-        self.lbl_battery = tk.Label(hud_frame, text="Battery: --", font=('Helvetica', 11))
-        self.lbl_battery.pack()
-        self.lbl_speed = tk.Label(hud_frame, text="Speed: --", font=('Helvetica', 11))
-        self.lbl_speed.pack()
-        self.lbl_eta = tk.Label(hud_frame, text="ETA: --", font=('Helvetica', 11))
-        self.lbl_eta.pack()
+        nb.add(self._build_uc1_tab(nb), text="UC1 — Drone Diagnostics")
+        nb.add(self._build_uc2_tab(nb), text="UC2 — Delivery")
+        nb.add(self._build_uc3_tab(nb), text="UC3 — Order")
 
-        ctrl_frame = tk.LabelFrame(self.root, text="Send Commands to Pi")
-        ctrl_frame.pack(fill="both", expand=True, padx=10, pady=5)
+    def _btn(self, parent, text, cmd):
+        tk.Button(parent, text=text, height=2, command=cmd).pack(fill="x", padx=10, pady=3)
 
-        def add_btn(parent, text, trigger):
-            tk.Button(parent, text=text, height=2, command=lambda: self.send_command(trigger)).pack(fill="x", padx=10, pady=5)
+    def _send(self, trigger, machine):
+        self.driver.send(trigger, machine)
 
-        add_btn(ctrl_frame, "1. Send Package", "package_sent")
-        add_btn(ctrl_frame, "2. Arrive at Pickup", "package_at_pickup")
-        add_btn(ctrl_frame, "3. Pick Up", "picked_up")
-        add_btn(ctrl_frame, "4. Drop Off", "dropped_off")
-        add_btn(ctrl_frame, "5. Confirm Delivery", "delivered")
-        add_btn(ctrl_frame, "6. Package Returned", "returned")
+    # ----------------------------------------------------------- UC1 tab
+    def _build_uc1_tab(self, parent):
+        frame = tk.Frame(parent)
 
+        info = tk.LabelFrame(frame, text="Drone: DEMO-01", font=("Helvetica", 11, "bold"))
+        info.pack(fill="x", padx=8, pady=8, ipady=6)
+        self.uc1_lbl_status  = tk.Label(info, text="STATE: WAITING...", font=("Helvetica", 13, "bold"), fg="grey")
+        self.uc1_lbl_status.pack(pady=4)
+        self.uc1_lbl_battery = tk.Label(info, text="Battery: --", font=("Helvetica", 10))
+        self.uc1_lbl_battery.pack()
+        self.uc1_lbl_rotors  = tk.Label(info, text="Rotors OK: --", font=("Helvetica", 10))
+        self.uc1_lbl_rotors.pack()
+        self.uc1_lbl_sensors = tk.Label(info, text="Sensors OK: --", font=("Helvetica", 10))
+        self.uc1_lbl_sensors.pack()
+
+        ctrl = tk.LabelFrame(frame, text="Controls")
+        ctrl.pack(fill="both", expand=True, padx=8, pady=4)
+        self._btn(ctrl, "Run Diagnostic",    lambda: self._send("run_diag",    "uc1_stm"))
+        self._btn(ctrl, "Reset to Idle",     lambda: self._send("go_idle",     "uc1_stm"))
+        self._btn(ctrl, "Drone Busy",        lambda: self._send("drone_busy",  "uc1_stm"))
+        self._btn(ctrl, "Drone Free",        lambda: self._send("drone_free",  "uc1_stm"))
+        return frame
+
+    # ----------------------------------------------------------- UC2 tab
+    def _build_uc2_tab(self, parent):
+        frame = tk.Frame(parent)
+
+        info = tk.LabelFrame(frame, text="Package: PKG-123", font=("Helvetica", 11, "bold"))
+        info.pack(fill="x", padx=8, pady=8, ipady=6)
+        self.uc2_lbl_status  = tk.Label(info, text="STATE: WAITING...", font=("Helvetica", 13, "bold"), fg="grey")
+        self.uc2_lbl_status.pack(pady=4)
+        self.uc2_lbl_battery = tk.Label(info, text="Battery: --", font=("Helvetica", 10))
+        self.uc2_lbl_battery.pack()
+        self.uc2_lbl_speed   = tk.Label(info, text="Speed: --", font=("Helvetica", 10))
+        self.uc2_lbl_speed.pack()
+        self.uc2_lbl_eta     = tk.Label(info, text="ETA: --", font=("Helvetica", 10))
+        self.uc2_lbl_eta.pack()
+
+        ctrl = tk.LabelFrame(frame, text="Controls")
+        ctrl.pack(fill="both", expand=True, padx=8, pady=4)
+        self._btn(ctrl, "1. Send Package",       lambda: self._send("package_sent",      "uc2_stm"))
+        self._btn(ctrl, "2. Arrive at Pickup",   lambda: self._send("package_at_pickup", "uc2_stm"))
+        self._btn(ctrl, "3. Pick Up",            lambda: self._send("picked_up",         "uc2_stm"))
+        self._btn(ctrl, "4. Drop Off",           lambda: self._send("dropped_off",       "uc2_stm"))
+        self._btn(ctrl, "5. Confirm Delivery",   lambda: self._send("delivered",         "uc2_stm"))
+        self._btn(ctrl, "6. Package Returned",   lambda: self._send("returned",          "uc2_stm"))
+        tk.Label(ctrl, text="Note: if Delivered not clicked within 8s\nof Drop Off, drone returns to sender.",
+                 fg="grey", font=("Helvetica", 8)).pack(pady=4)
+        return frame
+
+    # ----------------------------------------------------------- UC3 tab
+    def _build_uc3_tab(self, parent):
+        frame = tk.Frame(parent)
+
+        info = tk.LabelFrame(frame, text="Order Status", font=("Helvetica", 11, "bold"))
+        info.pack(fill="x", padx=8, pady=8, ipady=6)
+        self.uc3_lbl_status   = tk.Label(info, text="STATE: WAITING...", font=("Helvetica", 13, "bold"), fg="grey")
+        self.uc3_lbl_status.pack(pady=4)
+        self.uc3_lbl_tracking = tk.Label(info, text="Tracking: --", font=("Helvetica", 10))
+        self.uc3_lbl_tracking.pack()
+        self.uc3_lbl_drone    = tk.Label(info, text="Drone: --", font=("Helvetica", 10))
+        self.uc3_lbl_drone.pack()
+
+        ctrl = tk.LabelFrame(frame, text="Controls")
+        ctrl.pack(fill="both", expand=True, padx=8, pady=4)
+        self._btn(ctrl, "1. Place Order",          lambda: self._uc3_place_order())
+        self._btn(ctrl, "2. Payment Confirmed",    lambda: self._send("payment_confirmed",    "uc3_stm"))
+        self._btn(ctrl, "3. Payment Failed",       lambda: self._send("payment_failed",       "uc3_stm"))
+        self._btn(ctrl, "4. Drone Found",          lambda: self._send("available_drone_found","uc3_stm"))
+        self._btn(ctrl, "5. Drone Dispatched",     lambda: self._send("drone_sent",           "uc3_stm"))
+        return frame
+
+    def _uc3_place_order(self):
+        self.uc3_order.information(
+            location={"pickup": "Trondheim Central", "dropoff": "Moholt"},
+            measurements={"weight": 1.2, "size": "small"},
+            personal_info={"name": "Demo User", "email": "demo@example.com"},
+        )
+        self._send("order_sent", "uc3_stm")
+
+    # ----------------------------------------------------------------- run
     def start(self):
         self.root.mainloop()
 
     def stop(self):
+        self.driver.stop()
         self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
         self.root.destroy()
 
+
 if __name__ == "__main__":
-    app = DroneHUDApp()
+    app = PcHudApp()
     app.start()

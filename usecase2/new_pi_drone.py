@@ -1,140 +1,100 @@
 import paho.mqtt.client as mqtt
-import stmpy
 import json
-import time
+import threading
 
-# --- Use Sense HAT instead of gpiozero ---
 try:
     from sense_hat import SenseHat
+    sense = SenseHat()
     HARDWARE_MODE = True
 except ImportError:
+    sense = None
     HARDWARE_MODE = False
     print("⚠️ sense_hat not found. Running in software-only mode.")
 
-class PackageDeliveryComponent:
-    def __init__(self, package_id, mqtt_client, sense):
-        self.package_id = package_id
-        self.mqtt_client = mqtt_client
-        self.sense = sense
-        self.status_topic = f"delivery/{package_id}/status"
-        
-        self.telemetry = {"pos": [63.43, 10.39], "battery": 100, "speed": 0, "eta": "Ready"}
+# UC1 - Drone diagnostics  (drone/+/status)
+UC1_DISPLAY = {
+    "IDLE":        ("IDLE",      (0,   0,   255)),
+    "DIAGNOSTIC":  ("DIAG",      (255, 165, 0)),
+    "READY":       ("READY",     (0,   200, 0)),
+    "CHARGING":    ("CHARGE",    (0,   180, 255)),
+    "MAINTENANCE": ("MAINT",     (255, 80,  0)),
+    "OFFLINE":     ("OFFLINE",   (80,  0,   0)),
+    "DELIVERING":  ("DELIVER",   (180, 0,   180)),
+}
 
-    def _publish_update(self, state_name, led_color=None):
-        payload = {
-            "package_id": self.package_id,
-            "status": state_name,
-            "telemetry": self.telemetry,
-            "timestamp": time.time()
-        }
-        self.mqtt_client.publish(self.status_topic, json.dumps(payload))
-        print(f"[{state_name}] Published to PC.")
-        
-        # Change the color of the whole Sense HAT grid (values 0-255)
-        if self.sense and led_color:
-            self.sense.clear(led_color)
+# UC2 - Package delivery  (delivery/+/status)
+UC2_DISPLAY = {
+    "Idle":                   ("IDLE",     (0,   0,   255)),
+    "Notice of package":      ("NOTICE",   (0,   255, 255)),
+    "Ready for drone pickup": ("READY",    (255, 255, 0)),
+    "In transport":           ("TRANSIT",  (0,   200, 0)),
+    "At delivery place":      ("ARRIVED",  (180, 0,   180)),
+    "Return to sender":       ("RETURN",   (255, 0,   0)),
+}
 
-    def on_idle(self):
-        self.telemetry["speed"] = 0
-        self._publish_update("Idle", (0, 0, 255)) # Blue
+# UC3 - Order processing  (order/status)
+UC3_DISPLAY = {
+    "IDLE":               ("IDLE",    (0,   0,   255)),
+    "CONFIRMING_PAYMENT": ("PAYMENT", (255, 200, 0)),
+    "CREATE_ORDER":       ("ORDER",   (0,   255, 200)),
+    "FINDING_DRONE":      ("FINDING", (0,   180, 255)),
+    "PREPARING_DRONE":    ("PREP",    (180, 0,   180)),
+}
 
-    def on_notice(self):
-        self._publish_update("Notice of package", (0, 255, 255)) # Cyan
-        
-    def on_pickup_ready(self):
-        self._publish_update("Ready for drone pickup", (255, 255, 0)) # Yellow
+SUBSCRIPTIONS = [
+    ("drone/+/status",    UC1_DISPLAY),
+    ("delivery/+/status", UC2_DISPLAY),
+    ("order/status",      UC3_DISPLAY),
+]
 
-    def on_transport(self):
-        self.telemetry["speed"] = 45
-        self.telemetry["battery"] -= 5
-        self.telemetry["eta"] = "12 mins"
-        self._publish_update("In transport", (0, 255, 0)) # Green
 
-    def on_delivery_place(self):
-        self.telemetry["speed"] = 0
-        self.telemetry["eta"] = "Arrived"
-        self._publish_update("At delivery place", (255, 0, 255)) # Purple
+def show_status(label, color):
+    print(f"[DISPLAY] {label}")
+    if sense:
+        def _run():
+            sense.show_message(label, text_colour=color, back_colour=(0, 0, 0), scroll_speed=0.06)
+            sense.clear(*color)
+        threading.Thread(target=_run, daemon=True).start()
 
-    def on_return(self):
-        self.telemetry["speed"] = 45
-        self.telemetry["eta"] = "Returning..."
-        self._publish_update("Return to sender", (255, 0, 0)) # Red
 
-    def remove_package(self):
-        print("Cleaned up resources.")
-        if self.sense:
-            self.sense.clear() # Turns off all LEDs
+def on_connect(client, userdata, flags, rc, properties=None):
+    print("Connected to MQTT broker.")
+    for topic, _ in SUBSCRIPTIONS:
+        client.subscribe(topic)
+        print(f"  Subscribed: {topic}")
 
-# State Machine Definitions
-t0 = {'source': 'initial', 'target': 'Idle'}
-t1 = {'trigger': 'package_sent', 'source': 'Idle', 'target': 'Notice of package'}
-t2 = {'trigger': 'package_at_pickup', 'source': 'Notice of package', 'target': 'Ready for drone pickup'}
-t3 = {'trigger': 'picked_up', 'source': 'Ready for drone pickup', 'target': 'In transport'}
-t4 = {'trigger': 'dropped_off', 'source': 'In transport', 'target': 'At delivery place'}
-t5 = {'trigger': 'delivered', 'source': 'At delivery place', 'target': 'Idle', 'effect': 'remove_package'}
-t6 = {'trigger': 't', 'source': 'At delivery place', 'target': 'Return to sender'}
-t7 = {'trigger': 'returned', 'source': 'Return to sender', 'target': 'Idle', 'effect': 'remove_package'}
 
-idle = {'name': 'Idle', 'entry': 'on_idle'}
-notice = {'name': 'Notice of package', 'entry': 'on_notice'}
-pickup = {'name': 'Ready for drone pickup', 'entry': 'on_pickup_ready'}
-transport = {'name': 'In transport', 'entry': 'on_transport'}
-at_place = {'name': 'At delivery place', 'entry': 'on_delivery_place; start_timer("t", 8000)'}
-ret_sender = {'name': 'Return to sender', 'entry': 'on_return'}
+def on_message(client, userdata, msg):
+    try:
+        data = json.loads(msg.payload.decode("utf-8"))
+        status = data.get("status", "")
+        topic = msg.topic
 
-class PiDroneNode:
-    def __init__(self):
-        self.package_id = "PKG-123"
-        self.command_topic = f"delivery/{self.package_id}/command"
-        
-        # Initialize the Sense HAT
-        if HARDWARE_MODE:
-            self.sense = SenseHat()
-            self.sense.clear() # Make sure it starts blank
+        if topic.startswith("drone/"):
+            display_map = UC1_DISPLAY
+        elif topic.startswith("delivery/"):
+            display_map = UC2_DISPLAY
+        elif topic.startswith("order/"):
+            display_map = UC3_DISPLAY
         else:
-            self.sense = None
+            return
 
-        # 1. Setup MQTT
-        self.mqtt_client = mqtt.Client()
-        self.mqtt_client.on_connect = self.on_connect
-        self.mqtt_client.on_message = self.on_message
-        self.mqtt_client.connect("broker.hivemq.com", 1883)
-        self.mqtt_client.loop_start()
+        label, color = display_map.get(status, ("?", (255, 255, 255)))
+        show_status(label, color)
 
-        # 2. Setup STMPY Machine
-        self.delivery_logic = PackageDeliveryComponent(self.package_id, self.mqtt_client, self.sense)
-        self.machine = stmpy.Machine(
-            name='package_stm', 
-            transitions=[t0, t1, t2, t3, t4, t5, t6, t7], 
-            obj=self.delivery_logic,
-            states=[idle, notice, pickup, transport, at_place, ret_sender]
-        )
-        self.driver = stmpy.Driver()
-        self.driver.add_machine(self.machine)
-        self.driver.start()
+    except Exception as e:
+        print(f"Failed to parse message: {e}")
 
-    def on_connect(self, client, userdata, flags, rc):
-        print('Pi Connected to MQTT. Waiting for commands from PC...')
-        self.mqtt_client.subscribe(self.command_topic)
 
-    def on_message(self, client, userdata, msg):
-        trigger = msg.payload.decode('utf-8')
-        print(f"Received command from PC: {trigger}")
-        self.driver.send(trigger, 'package_stm')
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+client.on_connect = on_connect
+client.on_message = on_message
+client.connect("broker.hivemq.com", 1883)
 
-    def run(self):
-        print("Drone Node Running (Press Ctrl+C to stop)...")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("\nShutting down Drone Node...")
-            if self.sense: 
-                self.sense.clear() # Turn off on exit
-            self.driver.stop()
-            self.mqtt_client.loop_stop()
-            self.mqtt_client.disconnect()
-
-if __name__ == "__main__":
-    node = PiDroneNode()
-    node.run()
+print("Pi Display running (Ctrl+C to stop)...")
+try:
+    client.loop_forever()
+except KeyboardInterrupt:
+    print("\nStopping...")
+    if sense:
+        sense.clear()
