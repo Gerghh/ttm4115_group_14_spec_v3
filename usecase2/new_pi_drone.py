@@ -48,13 +48,26 @@ SUBSCRIPTIONS = [
 ]
 
 
+_display_lock = threading.Lock()
+_latest_msg = [None]  # tracks the most recently requested (label, color)
+
+
 def show_status(label, color):
     print(f"[DISPLAY] {label}")
-    if sense:
-        def _run():
+    if not sense:
+        return
+    _latest_msg[0] = (label, color)
+
+    def _run():
+        with _display_lock:
+            # If a newer message arrived while waiting for the lock, skip this one
+            if _latest_msg[0] != (label, color):
+                return
+            sense.set_rotation(0)
             sense.show_message(label, text_colour=color, back_colour=(0, 0, 0), scroll_speed=0.06)
             sense.clear(*color)
-        threading.Thread(target=_run, daemon=True).start()
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def on_connect(client, userdata, flags, rc, properties=None):

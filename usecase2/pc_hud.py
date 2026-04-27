@@ -130,12 +130,20 @@ class PcHudApp:
         self.uc3_lbl_tracking.config(text=f"Tracking: {order.get('tracking_number') or '--'}")
         self.uc3_lbl_drone.config(text=f"Drone: {order.get('assigned_drone') or '--'}")
 
+    def _uc2_publish_idle(self):
+        import json, time
+        payload = json.dumps({"package_id": "PKG-123", "status": "Idle",
+                              "telemetry": {"battery": 100, "speed": 0, "eta": "Ready"},
+                              "timestamp": time.time()})
+        self.mqtt_client.publish("delivery/PKG-123/status", payload)
+
     def _uc2_confirm_delivery(self):
         if self.uc2_current_state == "At delivery place":
             self.uc2_lbl_status.config(text="STATE: IDLE", fg=UC2_COLORS["Idle"])
             self.uc2_lbl_battery.config(text="Battery: --")
             self.uc2_lbl_speed.config(text="Speed: --")
             self.uc2_lbl_eta.config(text="ETA: --")
+            self._uc2_publish_idle()
 
     def _uc2_package_returned(self):
         if self.uc2_current_state == "Return to sender":
@@ -143,6 +151,7 @@ class PcHudApp:
             self.uc2_lbl_battery.config(text="Battery: --")
             self.uc2_lbl_speed.config(text="Speed: --")
             self.uc2_lbl_eta.config(text="ETA: --")
+            self._uc2_publish_idle()
 
     # ----------------------------------------------------------- GUI builder
     def _build_gui(self):
