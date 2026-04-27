@@ -16,7 +16,7 @@ from usecase3.StateMachine import OrderProcessComponent,    UC3_TRANSITIONS, UC3
 UC1_COLORS = {
     "IDLE": "grey", "DIAGNOSTIC": "orange", "READY": "green",
     "CHARGING": "royalblue", "MAINTENANCE": "darkorange",
-    "OFFLINE": "darkred", "DELIVERING": "purple",
+    "BROKEN": "red", "OFFLINE": "darkred", "DELIVERING": "purple",
 }
 UC2_COLORS = {
     "Idle": "grey", "Notice of package": "orange",
@@ -190,10 +190,13 @@ class PcHudApp:
 
         ctrl = tk.LabelFrame(frame, text="Controls")
         ctrl.pack(fill="both", expand=True, padx=8, pady=4)
-        self._btn(ctrl, "Run Diagnostic",    lambda: self._send("run_diag",    "uc1_stm"))
-        self._btn(ctrl, "Reset to Idle",     lambda: self._send("go_idle",     "uc1_stm"))
-        self._btn(ctrl, "Drone Busy",        lambda: self._send("drone_busy",  "uc1_stm"))
-        self._btn(ctrl, "Drone Free",        lambda: self._send("drone_free",  "uc1_stm"))
+        self._btn(ctrl, "Run Diagnostic",      lambda: self._send("run_diag",            "uc1_stm"))
+        self._btn(ctrl, "Reset to Idle",       lambda: self._send("go_idle",             "uc1_stm"))
+        self._btn(ctrl, "Drone Busy",          lambda: self._send("drone_busy",          "uc1_stm"))
+        self._btn(ctrl, "Drone Free",          lambda: self._send("drone_free",          "uc1_stm"))
+        self._btn(ctrl, "Low Battery (10%)",   lambda: self._send("low_battery",         "uc1_stm"))
+        self._btn(ctrl, "Drone Broken",        lambda: self._send("drone_broken",        "uc1_stm"))
+        self._btn(ctrl, "Send to Maintenance", lambda: self._send("send_to_maintenance", "uc1_stm"))
         return frame
 
     # ----------------------------------------------------------- UC2 tab

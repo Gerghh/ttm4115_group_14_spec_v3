@@ -19,6 +19,7 @@ UC1_DISPLAY = {
     "READY":       ("READY",     (0,   200, 0)),
     "CHARGING":    ("CHARGE",    (0,   180, 255)),
     "MAINTENANCE": ("MAINT",     (255, 80,  0)),
+    "BROKEN":      ("BROKEN",    (255, 0,   0)),
     "OFFLINE":     ("OFFLINE",   (80,  0,   0)),
     "DELIVERING":  ("DELIVER",   (180, 0,   180)),
 }
