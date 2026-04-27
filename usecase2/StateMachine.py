@@ -8,8 +8,7 @@ class PackageDeliveryComponent:
         self.package_id = package_id
         self.mqtt_client = mqtt_client
         self.topic = f"delivery/{package_id}/status"
-        
-        # Telemetry data storage (from UC-2)
+
         self.telemetry = {
             "pos": [0.0, 0.0],
             "battery": 100,
@@ -28,7 +27,6 @@ class PackageDeliveryComponent:
         self.mqtt_client.publish(self.topic, json.dumps(payload))
         print(f"[MQTT] Published status: {state_name}")
 
-    # Entry actions defined in the STM
     def on_idle(self):
         print("System Idle. Waiting for package...")
 
@@ -39,7 +37,6 @@ class PackageDeliveryComponent:
         self._publish_update("Ready for drone pickup")
 
     def on_transport(self):
-        # UC-2: Simulating telemetry update
         self.telemetry["speed"] = 15 
         self._publish_update("In transport")
 
@@ -52,7 +49,6 @@ class PackageDeliveryComponent:
     def remove_package(self):
         print(f"Cleaning up resources for {self.package_id}")
 
-# Define the transitions from your diagram
 t0 = {'source': 'initial', 'target': 'Idle'}
 t1 = {'trigger': 'package_sent', 'source': 'Idle', 'target': 'Notice of package'}
 t2 = {'trigger': 'package_at_pickup', 'source': 'Notice of package', 'target': 'Ready for drone pickup'}
@@ -62,7 +58,6 @@ t5 = {'trigger': 'delivered', 'source': 'At delivery place', 'target': 'Idle', '
 t6 = {'trigger': 't', 'source': 'At delivery place', 'target': 'Return to sender'}
 t7 = {'trigger': 'returned', 'source': 'Return to sender', 'target': 'Idle', 'effect': 'remove_package'}
 
-# Define States with Entry Actions
 idle = {'name': 'Idle', 'entry': 'on_idle'}
 notice = {'name': 'Notice of package', 'entry': 'on_notice'}
 pickup = {'name': 'Ready for drone pickup', 'entry': 'on_pickup_ready'}

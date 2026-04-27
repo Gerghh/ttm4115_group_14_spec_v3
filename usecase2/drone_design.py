@@ -5,13 +5,20 @@ import json
 import time
 import logging
 
+<<<<<<< HEAD
 #components
+=======
+
+ASSIGNED_DRONE = "Drone-Alpha"  # Which UC-1 fleet drone is doing this delivery
+
+
+>>>>>>> f9629dd9d34214c541272a858fd6db34f9a04c17
 class PackageDeliveryComponent:
     def __init__(self, package_id, mqtt_client):
         self.package_id = package_id
         self.mqtt_client = mqtt_client
         self.topic = f"delivery/{package_id}/status"
-        
+
         self.telemetry = {
             "pos": [63.4305, 10.3951], # coordinated for Trondheim
             "battery": 100,
@@ -22,6 +29,7 @@ class PackageDeliveryComponent:
     def _publish_update(self, state_name):
         payload = {
             "package_id": self.package_id,
+            "drone_id": ASSIGNED_DRONE,  # UC-1 fleet dashboard listens for this
             "status": state_name,
             "telemetry": self.telemetry,
             "timestamp": time.time()
@@ -58,7 +66,10 @@ class PackageDeliveryComponent:
         print(f"[{self.package_id}] Cleaned up resources.")
 
 
+<<<<<<< HEAD
 # State Machine Def
+=======
+>>>>>>> f9629dd9d34214c541272a858fd6db34f9a04c17
 t0 = {'source': 'initial', 'target': 'Idle'}
 t1 = {'trigger': 'package_sent', 'source': 'Idle', 'target': 'Notice of package'}
 t2 = {'trigger': 'package_at_pickup', 'source': 'Notice of package', 'target': 'Ready for drone pickup'}
@@ -75,8 +86,11 @@ transport = {'name': 'In transport', 'entry': 'on_transport'}
 at_place = {'name': 'At delivery place', 'entry': 'on_delivery_place; start_timer("t", 8000)'} # 8 second timer
 ret_sender = {'name': 'Return to sender', 'entry': 'on_return'}
 
+<<<<<<< HEAD
 
 #hud
+=======
+>>>>>>> f9629dd9d34214c541272a858fd6db34f9a04c17
 class DroneHUDApp:
     def __init__(self):
         logging.basicConfig(level=logging.INFO)
@@ -84,14 +98,20 @@ class DroneHUDApp:
         self.package_id = "PKG-123"
         self.topic = f"delivery/{self.package_id}/status"
 
+<<<<<<< HEAD
         #MQTT Client Setup
+=======
+>>>>>>> f9629dd9d34214c541272a858fd6db34f9a04c17
         self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.mqtt_client.on_connect = self.on_connect
         self.mqtt_client.on_message = self.on_message
         self.mqtt_client.connect("broker.hivemq.com", 1883)
         self.mqtt_client.loop_start()
 
+<<<<<<< HEAD
         #STMPY State Machine Setup
+=======
+>>>>>>> f9629dd9d34214c541272a858fd6db34f9a04c17
         self.delivery_logic = PackageDeliveryComponent(self.package_id, self.mqtt_client)
         self.machine = stmpy.Machine(
             name='package_stm', 
@@ -103,20 +123,21 @@ class DroneHUDApp:
         self.driver.add_machine(self.machine)
         self.driver.start()
 
+<<<<<<< HEAD
         #GUI Setup
+=======
+>>>>>>> f9629dd9d34214c541272a858fd6db34f9a04c17
         self.create_gui()
 
     def on_connect(self, client, userdata, flags, reason_code, properties):
         self._logger.info(f'Connected to MQTT broker.')
-        # Subscribe to our own drone's status topic to feed the HUD
         self.mqtt_client.subscribe(self.topic)
 
     def on_message(self, client, userdata, msg):
         """Receives MQTT JSON and updates the GUI HUD safely."""
         payload_str = msg.payload.decode('utf-8')
         data = json.loads(payload_str)
-        
-        # We use root.after to safely update the Tkinter UI from the MQTT thread
+
         self.root.after(0, self.update_hud_display, data)
 
     def update_hud_display(self, data):
@@ -137,7 +158,10 @@ class DroneHUDApp:
         self.root.geometry("350x550")
         self.root.protocol("WM_DELETE_WINDOW", self.stop)
 
+<<<<<<< HEAD
         #Frame of the HUD
+=======
+>>>>>>> f9629dd9d34214c541272a858fd6db34f9a04c17
         hud_frame = tk.LabelFrame(self.root, text="Live Telemetry HUD", font=('Helvetica', 12, 'bold'))
         hud_frame.pack(fill="x", padx=10, pady=10, ipady=10)
 
@@ -153,7 +177,10 @@ class DroneHUDApp:
         self.lbl_eta = tk.Label(hud_frame, text="ETA: --", font=('Helvetica', 11))
         self.lbl_eta.pack()
 
+<<<<<<< HEAD
         # Controls Frame
+=======
+>>>>>>> f9629dd9d34214c541272a858fd6db34f9a04c17
         ctrl_frame = tk.LabelFrame(self.root, text="System Controls (Send Triggers)")
         ctrl_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
@@ -167,7 +194,6 @@ class DroneHUDApp:
         add_btn(ctrl_frame, "5. Confirm Delivery (delivered)", "delivered")
         add_btn(ctrl_frame, "6. Package Returned (returned)", "returned")
 
-        # Warning text for the timer
         tk.Label(ctrl_frame, text="Note: If 'Delivered' isn't clicked within 8\nseconds of Drop Off, drone returns to sender.", fg="grey", font=("Helvetica", 8)).pack(pady=5)
 
     def start(self):
@@ -180,7 +206,10 @@ class DroneHUDApp:
         self.mqtt_client.disconnect()
         self.root.destroy()
 
+<<<<<<< HEAD
 # running
+=======
+>>>>>>> f9629dd9d34214c541272a858fd6db34f9a04c17
 if __name__ == "__main__":
     app = DroneHUDApp()
     app.start()
