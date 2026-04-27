@@ -40,6 +40,8 @@ class PcHudApp:
         self.mqtt_client.connect("broker.hivemq.com", 1883)
         self.mqtt_client.loop_start()
 
+        self.uc2_current_state = None
+
         self.driver = stmpy.Driver()
         self._setup_uc1()
         self._setup_uc2()
@@ -76,6 +78,7 @@ class PcHudApp:
             obj=self.uc1_drone,
             states=ALL_STATES,
         )
+        self.uc1_drone.stm = machine
         self.driver.add_machine(machine)
 
     # ------------------------------------------------------- UC2 setup
@@ -87,6 +90,7 @@ class PcHudApp:
             obj=self.uc2_pkg,
             states=UC2_STATES,
         )
+        self.uc2_pkg.stm = machine
         self.driver.add_machine(machine)
 
     # ------------------------------------------------------- UC3 setup
@@ -98,6 +102,7 @@ class PcHudApp:
             obj=self.uc3_order,
             states=UC3_STATES,
         )
+        self.uc3_order.stm = machine
         self.driver.add_machine(machine)
 
     # --------------------------------------------------- HUD update callbacks
@@ -111,6 +116,7 @@ class PcHudApp:
 
     def _update_uc2(self, data):
         s = data.get("status", "?")
+        self.uc2_current_state = s
         self.uc2_lbl_status.config(text=f"STATE: {s.upper()}", fg=UC2_COLORS.get(s, "black"))
         t = data.get("telemetry", {})
         self.uc2_lbl_battery.config(text=f"Battery: {t.get('battery', '--')}%")
@@ -123,6 +129,20 @@ class PcHudApp:
         order = data.get("order", {})
         self.uc3_lbl_tracking.config(text=f"Tracking: {order.get('tracking_number') or '--'}")
         self.uc3_lbl_drone.config(text=f"Drone: {order.get('assigned_drone') or '--'}")
+
+    def _uc2_confirm_delivery(self):
+        if self.uc2_current_state == "At delivery place":
+            self.uc2_lbl_status.config(text="STATE: IDLE", fg=UC2_COLORS["Idle"])
+            self.uc2_lbl_battery.config(text="Battery: --")
+            self.uc2_lbl_speed.config(text="Speed: --")
+            self.uc2_lbl_eta.config(text="ETA: --")
+
+    def _uc2_package_returned(self):
+        if self.uc2_current_state == "Return to sender":
+            self.uc2_lbl_status.config(text="STATE: IDLE", fg=UC2_COLORS["Idle"])
+            self.uc2_lbl_battery.config(text="Battery: --")
+            self.uc2_lbl_speed.config(text="Speed: --")
+            self.uc2_lbl_eta.config(text="ETA: --")
 
     # ----------------------------------------------------------- GUI builder
     def _build_gui(self):
@@ -188,8 +208,8 @@ class PcHudApp:
         self._btn(ctrl, "2. Arrive at Pickup",   lambda: self._send("package_at_pickup", "uc2_stm"))
         self._btn(ctrl, "3. Pick Up",            lambda: self._send("picked_up",         "uc2_stm"))
         self._btn(ctrl, "4. Drop Off",           lambda: self._send("dropped_off",       "uc2_stm"))
-        self._btn(ctrl, "5. Confirm Delivery",   lambda: self._send("delivered",         "uc2_stm"))
-        self._btn(ctrl, "6. Package Returned",   lambda: self._send("returned",          "uc2_stm"))
+        self._btn(ctrl, "5. Confirm Delivery",   lambda: (self._send("delivered", "uc2_stm"), self._uc2_confirm_delivery()))
+        self._btn(ctrl, "6. Package Returned",   lambda: (self._send("returned",  "uc2_stm"), self._uc2_package_returned()))
         tk.Label(ctrl, text="Note: if Delivered not clicked within 8s\nof Drop Off, drone returns to sender.",
                  fg="grey", font=("Helvetica", 8)).pack(pady=4)
         return frame

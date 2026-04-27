@@ -71,7 +71,7 @@ class DroneComponent:
 
 # Transitions
 t0  = {"source": "initial",             "target": "Idle"}
-t1  = {"trigger": "run_diag",           "source": "Idle",        "target": "Diagnostic", "effect": "on_diagnostic; evaluate"}
+t1  = {"trigger": "run_diag",           "source": "Idle",        "target": "Diagnostic"}
 t2  = {"trigger": "result_ready",       "source": "Diagnostic",  "target": "Ready"}
 t3  = {"trigger": "result_charging",    "source": "Diagnostic",  "target": "Charging"}
 t4  = {"trigger": "result_maintenance", "source": "Diagnostic",  "target": "Maintenance"}
@@ -85,7 +85,7 @@ t11 = {"trigger": "drone_free",         "source": "Delivering",  "target": "Read
 
 # States
 idle        = {"name": "Idle",        "entry": "on_idle"}
-diagnostic  = {"name": "Diagnostic",  "entry": "on_diagnostic"}
+diagnostic  = {"name": "Diagnostic",  "entry": "on_diagnostic; evaluate"}
 ready       = {"name": "Ready",       "entry": "on_ready"}
 charging    = {"name": "Charging",    "entry": "on_charging"}
 maintenance = {"name": "Maintenance", "entry": "on_maintenance"}
